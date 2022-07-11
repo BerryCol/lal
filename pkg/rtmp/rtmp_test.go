@@ -14,6 +14,6 @@ import (
 	"github.com/q191201771/lal/pkg/innertest"
 )
 
-func TestRTMP(t *testing.T) {
-	innertest.InnerTestEntry(t)
+func TestRtmp(t *testing.T) {
+	innertest.Entry(t)
 }

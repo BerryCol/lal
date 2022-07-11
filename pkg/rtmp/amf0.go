@@ -14,46 +14,43 @@ package rtmp
 
 import (
 	"bytes"
-	"errors"
+	"encoding/hex"
+	"github.com/q191201771/naza/pkg/nazabytes"
 	"io"
 
-	"github.com/q191201771/naza/pkg/bele"
-	"github.com/q191201771/naza/pkg/nazalog"
-)
+	"github.com/q191201771/lal/pkg/base"
+	"github.com/q191201771/naza/pkg/nazaerrors"
 
-var (
-	ErrAMFInvalidType = errors.New("lal.rtmp: invalid amf0 type")
-	ErrAMFTooShort    = errors.New("lal.rtmp: too short to unmarshal amf0 data")
-	ErrAMFNotExist    = errors.New("lal.rtmp: not exist")
+	"github.com/q191201771/naza/pkg/bele"
 )
 
 const (
-	AMF0TypeMarkerNumber     = uint8(0x00)
-	AMF0TypeMarkerBoolean    = uint8(0x01)
-	AMF0TypeMarkerString     = uint8(0x02)
-	AMF0TypeMarkerObject     = uint8(0x03)
-	AMF0TypeMarkerNull       = uint8(0x05)
-	AMF0TypeMarkerEcmaArray  = uint8(0x08)
-	AMF0TypeMarkerObjectEnd  = uint8(0x09)
-	AMF0TypeMarkerLongString = uint8(0x0c)
+	Amf0TypeMarkerNumber     = uint8(0x00)
+	Amf0TypeMarkerBoolean    = uint8(0x01)
+	Amf0TypeMarkerString     = uint8(0x02)
+	Amf0TypeMarkerObject     = uint8(0x03)
+	Amf0TypeMarkerNull       = uint8(0x05)
+	Amf0TypeMarkerEcmaArray  = uint8(0x08)
+	Amf0TypeMarkerObjectEnd  = uint8(0x09)
+	Amf0TypeMarkerLongString = uint8(0x0c)
 
 	// 还没用到的类型
-	//AMF0TypeMarkerMovieclip   = uint8(0x04)
-	//AMF0TypeMarkerUndefined   = uint8(0x06)
-	//AMF0TypeMarkerReference   = uint8(0x07)
-	//AMF0TypeMarkerStrictArray = uint8(0x0a)
-	//AMF0TypeMarkerData        = uint8(0x0b)
-	//AMF0TypeMarkerUnsupported = uint8(0x0d)
-	//AMF0TypeMarkerRecordset   = uint8(0x0e)
-	//AMF0TypeMarkerXmlDocument = uint8(0x0f)
-	//AMF0TypeMarkerTypedObject = uint8(0x10)
+	//Amf0TypeMarkerMovieclip   = uint8(0x04)
+	//Amf0TypeMarkerUndefined   = uint8(0x06)
+	//Amf0TypeMarkerReference   = uint8(0x07)
+	//Amf0TypeMarkerStrictArray = uint8(0x0a)
+	//Amf0TypeMarkerData        = uint8(0x0b)
+	//Amf0TypeMarkerUnsupported = uint8(0x0d)
+	//Amf0TypeMarkerRecordset   = uint8(0x0e)
+	//Amf0TypeMarkerXmlDocument = uint8(0x0f)
+	//Amf0TypeMarkerTypedObject = uint8(0x10)
 )
 
-var AMF0TypeMarkerObjectEndBytes = []byte{0, 0, AMF0TypeMarkerObjectEnd}
+var Amf0TypeMarkerObjectEndBytes = []byte{0, 0, Amf0TypeMarkerObjectEnd}
 
 type ObjectPair struct {
 	Key   string
-	Value interface{}
+	Value interface{} // TODO(chef): [perf] 考虑换成泛型 202206
 }
 
 type ObjectPairArray []ObjectPair
@@ -75,7 +72,7 @@ func (o ObjectPairArray) FindString(key string) (string, error) {
 			}
 		}
 	}
-	return "", ErrAMFNotExist
+	return "", base.ErrAmfNotExist
 }
 
 func (o ObjectPairArray) FindNumber(key string) (int, error) {
@@ -86,35 +83,35 @@ func (o ObjectPairArray) FindNumber(key string) (int, error) {
 			}
 		}
 	}
-	return -1, ErrAMFNotExist
+	return -1, base.ErrAmfNotExist
 }
 
 type amf0 struct{}
 
-var AMF0 amf0
+var Amf0 amf0
 
 // ----------------------------------------------------------------------------
 
 func (amf0) WriteNumber(writer io.Writer, val float64) error {
-	if _, err := writer.Write([]byte{AMF0TypeMarkerNumber}); err != nil {
+	if _, err := writer.Write([]byte{Amf0TypeMarkerNumber}); err != nil {
 		return err
 	}
-	return bele.WriteBE(writer, val)
+	return bele.WriteBe(writer, val)
 }
 
 func (amf0) WriteString(writer io.Writer, val string) error {
 	if len(val) < 65536 {
-		if _, err := writer.Write([]byte{AMF0TypeMarkerString}); err != nil {
+		if _, err := writer.Write([]byte{Amf0TypeMarkerString}); err != nil {
 			return err
 		}
-		if err := bele.WriteBE(writer, uint16(len(val))); err != nil {
+		if err := bele.WriteBe(writer, uint16(len(val))); err != nil {
 			return err
 		}
 	} else {
-		if _, err := writer.Write([]byte{AMF0TypeMarkerLongString}); err != nil {
+		if _, err := writer.Write([]byte{Amf0TypeMarkerLongString}); err != nil {
 			return err
 		}
-		if err := bele.WriteBE(writer, uint32(len(val))); err != nil {
+		if err := bele.WriteBe(writer, uint32(len(val))); err != nil {
 			return err
 		}
 	}
@@ -123,12 +120,12 @@ func (amf0) WriteString(writer io.Writer, val string) error {
 }
 
 func (amf0) WriteNull(writer io.Writer) error {
-	_, err := writer.Write([]byte{AMF0TypeMarkerNull})
+	_, err := writer.Write([]byte{Amf0TypeMarkerNull})
 	return err
 }
 
 func (amf0) WriteBoolean(writer io.Writer, b bool) error {
-	if _, err := writer.Write([]byte{AMF0TypeMarkerBoolean}); err != nil {
+	if _, err := writer.Write([]byte{Amf0TypeMarkerBoolean}); err != nil {
 		return err
 	}
 	v := uint8(0)
@@ -140,11 +137,11 @@ func (amf0) WriteBoolean(writer io.Writer, b bool) error {
 }
 
 func (amf0) WriteObject(writer io.Writer, opa ObjectPairArray) error {
-	if _, err := writer.Write([]byte{AMF0TypeMarkerObject}); err != nil {
+	if _, err := writer.Write([]byte{Amf0TypeMarkerObject}); err != nil {
 		return err
 	}
 	for i := 0; i < len(opa); i++ {
-		if err := bele.WriteBE(writer, uint16(len(opa[i].Key))); err != nil {
+		if err := bele.WriteBe(writer, uint16(len(opa[i].Key))); err != nil {
 			return err
 		}
 		if _, err := writer.Write([]byte(opa[i].Key)); err != nil {
@@ -152,22 +149,28 @@ func (amf0) WriteObject(writer io.Writer, opa ObjectPairArray) error {
 		}
 		switch opa[i].Value.(type) {
 		case string:
-			if err := AMF0.WriteString(writer, opa[i].Value.(string)); err != nil {
+			if err := Amf0.WriteString(writer, opa[i].Value.(string)); err != nil {
 				return err
 			}
-		case int:
-			if err := AMF0.WriteNumber(writer, float64(opa[i].Value.(int))); err != nil {
+		case int, float64:
+			var numberVal float64
+			if intval, ok := opa[i].Value.(int); ok {
+				numberVal = float64(intval)
+			} else if floatVal, ok := opa[i].Value.(float64); ok {
+				numberVal = floatVal
+			}
+			if err := Amf0.WriteNumber(writer, numberVal); err != nil {
 				return err
 			}
 		case bool:
-			if err := AMF0.WriteBoolean(writer, opa[i].Value.(bool)); err != nil {
+			if err := Amf0.WriteBoolean(writer, opa[i].Value.(bool)); err != nil {
 				return err
 			}
 		default:
-			nazalog.Panicf("unknown value type. i=%d, v=%+v", i, opa[i].Value)
+			Log.Panicf("unknown value type. i=%d, v=%+v", i, opa[i].Value)
 		}
 	}
-	_, err := writer.Write(AMF0TypeMarkerObjectEndBytes)
+	_, err := writer.Write(Amf0TypeMarkerObjectEndBytes)
 	return err
 }
 
@@ -184,128 +187,141 @@ func (amf0) WriteObject(writer io.Writer, opa ObjectPairArray) error {
 
 func (amf0) ReadStringWithoutType(b []byte) (string, int, error) {
 	if len(b) < 2 {
-		return "", 0, ErrAMFTooShort
+		return "", 0, nazaerrors.Wrap(base.ErrAmfTooShort)
 	}
-	l := int(bele.BEUint16(b))
+	l := int(bele.BeUint16(b))
 	if l > len(b)-2 {
-		return "", 0, ErrAMFTooShort
+		return "", 0, nazaerrors.Wrap(base.ErrAmfTooShort)
 	}
 	return string(b[2 : 2+l]), 2 + l, nil
 }
 
 func (amf0) ReadLongStringWithoutType(b []byte) (string, int, error) {
 	if len(b) < 4 {
-		return "", 0, ErrAMFTooShort
+		return "", 0, nazaerrors.Wrap(base.ErrAmfTooShort)
 	}
-	l := int(bele.BEUint32(b))
+	l := int(bele.BeUint32(b))
 	if l > len(b)-4 {
-		return "", 0, ErrAMFTooShort
+		return "", 0, nazaerrors.Wrap(base.ErrAmfTooShort)
 	}
 	return string(b[4 : 4+l]), 4 + l, nil
 }
 
 func (amf0) ReadString(b []byte) (val string, l int, err error) {
 	if len(b) < 1 {
-		return "", 0, ErrAMFTooShort
+		return "", 0, nazaerrors.Wrap(base.ErrAmfTooShort)
 	}
 	switch b[0] {
-	case AMF0TypeMarkerString:
-		val, l, err = AMF0.ReadStringWithoutType(b[1:])
+	case Amf0TypeMarkerString:
+		val, l, err = Amf0.ReadStringWithoutType(b[1:])
 		l++
-	case AMF0TypeMarkerLongString:
-		val, l, err = AMF0.ReadLongStringWithoutType(b[1:])
+	case Amf0TypeMarkerLongString:
+		val, l, err = Amf0.ReadLongStringWithoutType(b[1:])
 		l++
 	default:
-		err = ErrAMFInvalidType
+		err = base.NewErrAmfInvalidType(b[0])
 	}
 	return
 }
 
 func (amf0) ReadNumber(b []byte) (float64, int, error) {
 	if len(b) < 9 {
-		return 0, 0, ErrAMFTooShort
+		return 0, 0, nazaerrors.Wrap(base.ErrAmfTooShort)
 	}
-	if b[0] != AMF0TypeMarkerNumber {
-		return 0, 0, ErrAMFInvalidType
+	if b[0] != Amf0TypeMarkerNumber {
+		return 0, 0, base.NewErrAmfInvalidType(b[0])
 	}
-	return bele.BEFloat64(b[1:]), 9, nil
+	return bele.BeFloat64(b[1:]), 9, nil
 }
 
 func (amf0) ReadBoolean(b []byte) (bool, int, error) {
 	if len(b) < 2 {
-		return false, 0, ErrAMFTooShort
+		return false, 0, nazaerrors.Wrap(base.ErrAmfTooShort)
 	}
-	if b[0] != AMF0TypeMarkerBoolean {
-		return false, 0, ErrAMFInvalidType
+	if b[0] != Amf0TypeMarkerBoolean {
+		return false, 0, base.NewErrAmfInvalidType(b[0])
 	}
 	return b[1] != 0x0, 2, nil
 }
 
 func (amf0) ReadNull(b []byte) (int, error) {
 	if len(b) < 1 {
-		return 0, ErrAMFTooShort
+		return 0, nazaerrors.Wrap(base.ErrAmfTooShort)
 	}
-	if b[0] != AMF0TypeMarkerNull {
-		return 0, ErrAMFInvalidType
+	if b[0] != Amf0TypeMarkerNull {
+		return 0, base.NewErrAmfInvalidType(b[0])
 	}
 	return 1, nil
 }
 
 func (amf0) ReadObject(b []byte) (ObjectPairArray, int, error) {
 	if len(b) < 1 {
-		return nil, 0, ErrAMFTooShort
+		return nil, 0, nazaerrors.Wrap(base.ErrAmfTooShort)
 	}
-	if b[0] != AMF0TypeMarkerObject {
-		return nil, 0, ErrAMFInvalidType
+	if b[0] != Amf0TypeMarkerObject {
+		return nil, 0, base.NewErrAmfInvalidType(b[0])
 	}
 
 	index := 1
 	var ops ObjectPairArray
 	for {
-		if len(b)-index >= 3 && bytes.Equal(b[index:index+3], AMF0TypeMarkerObjectEndBytes) {
+		if len(b)-index >= 3 && bytes.Equal(b[index:index+3], Amf0TypeMarkerObjectEndBytes) {
 			return ops, index + 3, nil
 		}
 
-		k, l, err := AMF0.ReadStringWithoutType(b[index:])
+		k, l, err := Amf0.ReadStringWithoutType(b[index:])
 		if err != nil {
 			return nil, 0, err
 		}
 		index += l
 		if len(b)-index < 1 {
-			return nil, 0, ErrAMFTooShort
+			return nil, 0, nazaerrors.Wrap(base.ErrAmfTooShort)
 		}
 		vt := b[index]
 		switch vt {
-		case AMF0TypeMarkerString:
-			v, l, err := AMF0.ReadString(b[index:])
+		case Amf0TypeMarkerNumber:
+			v, l, err := Amf0.ReadNumber(b[index:])
 			if err != nil {
 				return nil, 0, err
 			}
 			ops = append(ops, ObjectPair{k, v})
 			index += l
-		case AMF0TypeMarkerBoolean:
-			v, l, err := AMF0.ReadBoolean(b[index:])
+		case Amf0TypeMarkerBoolean:
+			v, l, err := Amf0.ReadBoolean(b[index:])
 			if err != nil {
 				return nil, 0, err
 			}
 			ops = append(ops, ObjectPair{k, v})
 			index += l
-		case AMF0TypeMarkerNumber:
-			v, l, err := AMF0.ReadNumber(b[index:])
+		case Amf0TypeMarkerString:
+			v, l, err := Amf0.ReadString(b[index:])
 			if err != nil {
 				return nil, 0, err
 			}
 			ops = append(ops, ObjectPair{k, v})
 			index += l
-		case AMF0TypeMarkerEcmaArray:
-			v, l, err := AMF0.ReadArray(b[index:])
+		case Amf0TypeMarkerObject:
+			v, l, err := Amf0.ReadObject(b[index:])
+			if err != nil {
+				return nil, 0, err
+			}
+			ops = append(ops, ObjectPair{k, v})
+			index += l
+		case Amf0TypeMarkerNull:
+			l, err := Amf0.ReadNull(b[index:])
+			if err != nil {
+				return nil, 0, err
+			}
+			index += l
+		case Amf0TypeMarkerEcmaArray:
+			v, l, err := Amf0.ReadArray(b[index:])
 			if err != nil {
 				return nil, 0, err
 			}
 			ops = append(ops, ObjectPair{k, v})
 			index += l
 		default:
-			nazalog.Panicf("unknown type. vt=%d", vt)
+			Log.Panicf("unknown type. vt=%d, hex=%s", vt, hex.Dump(nazabytes.Prefix(b, 4096)))
 		}
 	}
 }
@@ -316,70 +332,76 @@ func (amf0) ReadObject(b []byte) (ObjectPairArray, int, error) {
 
 func (amf0) ReadArray(b []byte) (ObjectPairArray, int, error) {
 	if len(b) < 5 {
-		return nil, 0, ErrAMFTooShort
+		return nil, 0, nazaerrors.Wrap(base.ErrAmfTooShort)
 	}
-	if b[0] != AMF0TypeMarkerEcmaArray {
-		return nil, 0, ErrAMFInvalidType
+	if b[0] != Amf0TypeMarkerEcmaArray {
+		return nil, 0, base.NewErrAmfInvalidType(b[0])
 	}
-	count := int(bele.BEUint32(b[1:]))
+	count := int(bele.BeUint32(b[1:]))
 
 	index := 5
 	var ops ObjectPairArray
 	for i := 0; i < count; i++ {
-		k, l, err := AMF0.ReadStringWithoutType(b[index:])
+		k, l, err := Amf0.ReadStringWithoutType(b[index:])
 		if err != nil {
 			return nil, 0, err
 		}
 		index += l
 		if len(b)-index < 1 {
-			return nil, 0, ErrAMFTooShort
+			return nil, 0, nazaerrors.Wrap(base.ErrAmfTooShort)
 		}
 		vt := b[index]
 		switch vt {
-		case AMF0TypeMarkerString:
-			v, l, err := AMF0.ReadString(b[index:])
+		case Amf0TypeMarkerString:
+			v, l, err := Amf0.ReadString(b[index:])
 			if err != nil {
 				return nil, 0, err
 			}
 			ops = append(ops, ObjectPair{k, v})
 			index += l
-		case AMF0TypeMarkerBoolean:
-			v, l, err := AMF0.ReadBoolean(b[index:])
+		case Amf0TypeMarkerBoolean:
+			v, l, err := Amf0.ReadBoolean(b[index:])
 			if err != nil {
 				return nil, 0, err
 			}
 			ops = append(ops, ObjectPair{k, v})
 			index += l
-		case AMF0TypeMarkerNumber:
-			v, l, err := AMF0.ReadNumber(b[index:])
+		case Amf0TypeMarkerNumber:
+			v, l, err := Amf0.ReadNumber(b[index:])
 			if err != nil {
 				return nil, 0, err
 			}
 			ops = append(ops, ObjectPair{k, v})
+			index += l
+		case Amf0TypeMarkerNull:
+			l, err := Amf0.ReadNull(b[index:])
+			if err != nil {
+				return nil, 0, err
+			}
 			index += l
 		default:
-			nazalog.Panicf("unknown type. vt=%d", vt)
+			Log.Panicf("unknown type. vt=%d", vt)
 		}
 	}
 
-	if len(b)-index >= 3 && bytes.Equal(b[index:index+3], AMF0TypeMarkerObjectEndBytes) {
+	if len(b)-index >= 3 && bytes.Equal(b[index:index+3], Amf0TypeMarkerObjectEndBytes) {
 		index += 3
 	} else {
 		// 测试时发现Array最后也是以00 00 09结束，不确定是否是标准规定的，加个日志在这
-		nazalog.Warn("amf ReadArray without suffix AMF0TypeMarkerObjectEndBytes.")
+		Log.Warn("amf ReadArray without suffix Amf0TypeMarkerObjectEndBytes.")
 	}
 	return ops, index, nil
 }
 
 func (amf0) ReadObjectOrArray(b []byte) (ObjectPairArray, int, error) {
 	if len(b) < 1 {
-		return nil, 0, ErrAMFTooShort
+		return nil, 0, nazaerrors.Wrap(base.ErrAmfTooShort)
 	}
 	switch b[0] {
-	case AMF0TypeMarkerObject:
-		return AMF0.ReadObject(b)
-	case AMF0TypeMarkerEcmaArray:
-		return AMF0.ReadArray(b)
+	case Amf0TypeMarkerObject:
+		return Amf0.ReadObject(b)
+	case Amf0TypeMarkerEcmaArray:
+		return Amf0.ReadArray(b)
 	}
-	return nil, 0, ErrAMFInvalidType
+	return nil, 0, base.NewErrAmfInvalidType(b[0])
 }

@@ -9,9 +9,9 @@
 package base
 
 import (
-	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -21,16 +21,15 @@ import (
 
 // TODO chef: 考虑部分内容移入naza中
 
-var ErrURL = errors.New("lal.url: fxxk")
-
 const (
-	DefaultRTMPPort  = 1935
-	DefaultHTTPPort  = 80
-	DefaultHTTPSPort = 443
-	DefaultRTSPPort  = 554
+	DefaultRtmpPort  = 1935
+	DefaultHttpPort  = 80
+	DefaultHttpsPort = 443
+	DefaultRtspPort  = 554
+	DefaultRtmpsPort = 443
 )
 
-type URLPathContext struct {
+type UrlPathContext struct {
 	PathWithRawQuery    string
 	Path                string
 	PathWithoutLastItem string // 注意，没有前面的'/'，也没有后面的'/'
@@ -38,9 +37,8 @@ type URLPathContext struct {
 	RawQuery            string
 }
 
-// TODO chef: 考虑把rawURL也放入其中
-type URLContext struct {
-	URL string
+type UrlContext struct {
+	Url string
 
 	Scheme       string
 	Username     string
@@ -50,41 +48,87 @@ type URLContext struct {
 	Host         string
 	Port         int
 
-	//URLPathContext
+	//UrlPathContext
 	PathWithRawQuery    string
 	Path                string
 	PathWithoutLastItem string // 注意，没有前面的'/'，也没有后面的'/'
 	LastItemOfPath      string // 注意，没有前面的'/'
-	RawQuery            string
+	RawQuery            string // 参数
 
-	RawURLWithoutUserInfo string
+	RawUrlWithoutUserInfo string
+
+	filenameWithoutType string
+	fileType            string
 }
 
-func ParseURL(rawURL string, defaultPort int) (ctx URLContext, err error) {
-	ctx.URL = rawURL
+func (u *UrlContext) GetFilenameWithoutType() string {
+	u.calcFilenameAndTypeIfNeeded()
+	return u.filenameWithoutType
+}
 
-	stdURL, err := url.Parse(rawURL)
+func (u *UrlContext) GetFileType() string {
+	u.calcFilenameAndTypeIfNeeded()
+	return u.fileType
+}
+
+func (u *UrlContext) calcFilenameAndTypeIfNeeded() {
+	if len(u.filenameWithoutType) == 0 || len(u.fileType) == 0 {
+		ss := strings.Split(u.LastItemOfPath, ".")
+		u.filenameWithoutType = ss[0]
+		if len(ss) > 1 {
+			u.fileType = ss[1]
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+
+// ParseUrl
+//
+// @param defaultPort: 注意，如果rawUrl中显示指定了端口，则该参数不生效
+//                     注意，如果设置为-1，内部依然会对常见协议(http, https, rtmp, rtsp)设置官方默认端口
+//
+func ParseUrl(rawUrl string, defaultPort int) (ctx UrlContext, err error) {
+	ctx.Url = rawUrl
+
+	stdUrl, err := url.Parse(rawUrl)
 	if err != nil {
 		return ctx, err
 	}
-	if stdURL.Scheme == "" {
-		return ctx, ErrURL
+	if stdUrl.Scheme == "" {
+		return ctx, fmt.Errorf("%w. url=%s", ErrInvalidUrl, rawUrl)
+	}
+	// 如果不存在，则设置默认的
+	if defaultPort == -1 {
+		// TODO(chef): 测试大小写的情况
+		switch stdUrl.Scheme {
+		case "http":
+			defaultPort = DefaultHttpPort
+		case "https":
+			defaultPort = DefaultHttpsPort
+		case "rtmp":
+			defaultPort = DefaultRtmpPort
+		case "rtsp":
+			defaultPort = DefaultRtspPort
+		case "rtmps":
+			defaultPort = DefaultRtmpsPort
+		}
 	}
 
-	ctx.Scheme = stdURL.Scheme
-	ctx.StdHost = stdURL.Host
-	ctx.Username = stdURL.User.Username()
-	ctx.Password, _ = stdURL.User.Password()
+	ctx.Scheme = stdUrl.Scheme
+	ctx.StdHost = stdUrl.Host
+	ctx.Username = stdUrl.User.Username()
+	ctx.Password, _ = stdUrl.User.Password()
 
-	h, p, err := net.SplitHostPort(stdURL.Host)
+	h, p, err := net.SplitHostPort(stdUrl.Host)
 	if err != nil {
-		// url中端口不存r
+		// url中端口不存在
 
-		ctx.Host = stdURL.Host
+		ctx.Host = stdUrl.Host
 		if defaultPort == -1 {
-			ctx.HostWithPort = stdURL.Host
+			ctx.HostWithPort = stdUrl.Host
 		} else {
-			ctx.HostWithPort = net.JoinHostPort(stdURL.Host, fmt.Sprintf("%d", defaultPort))
+			ctx.HostWithPort = net.JoinHostPort(stdUrl.Host, fmt.Sprintf("%d", defaultPort))
 			ctx.Port = defaultPort
 		}
 	} else {
@@ -95,11 +139,10 @@ func ParseURL(rawURL string, defaultPort int) (ctx URLContext, err error) {
 			return ctx, err
 		}
 		ctx.Host = h
-		ctx.HostWithPort = stdURL.Host
-
+		ctx.HostWithPort = stdUrl.Host
 	}
 
-	pathCtx, err := parseURLPath(stdURL)
+	pathCtx, err := parseUrlPath(stdUrl)
 	if err != nil {
 		return ctx, err
 	}
@@ -109,17 +152,19 @@ func ParseURL(rawURL string, defaultPort int) (ctx URLContext, err error) {
 	ctx.LastItemOfPath = pathCtx.LastItemOfPath
 	ctx.RawQuery = pathCtx.RawQuery
 
-	ctx.RawURLWithoutUserInfo = fmt.Sprintf("%s://%s%s", ctx.Scheme, ctx.StdHost, ctx.PathWithRawQuery)
+	ctx.RawUrlWithoutUserInfo = fmt.Sprintf("%s://%s%s", ctx.Scheme, ctx.StdHost, ctx.PathWithRawQuery)
 	return ctx, nil
 }
 
-func ParseRTMPURL(rawURL string) (ctx URLContext, err error) {
-	ctx, err = ParseURL(rawURL, DefaultRTMPPort)
+// ---------------------------------------------------------------------------------------------------------------------
+
+func ParseRtmpUrl(rawUrl string) (ctx UrlContext, err error) {
+	ctx, err = ParseUrl(rawUrl, -1)
 	if err != nil {
 		return
 	}
-	if ctx.Scheme != "rtmp" || ctx.Host == "" || ctx.Path == "" {
-		return ctx, ErrURL
+	if ctx.Scheme != "rtmp" && ctx.Scheme != "rtmps" || ctx.Host == "" || ctx.Path == "" {
+		return ctx, fmt.Errorf("%w. url=%s", ErrInvalidUrl, rawUrl)
 	}
 
 	// 注意，使用ffmpeg推流时，会把`rtmp://127.0.0.1/test110`中的test110作为appName(streamName则为空)
@@ -133,28 +178,44 @@ func ParseRTMPURL(rawURL string) (ctx URLContext, err error) {
 	return
 }
 
-func ParseHTTPFLVURL(rawURL string, isHTTPS bool) (ctx URLContext, err error) {
-	return ParseHTTPURL(rawURL, isHTTPS, ".flv")
-}
-
-func ParseHTTPTSURL(rawURL string, isHTTPS bool) (ctx URLContext, err error) {
-	return ParseHTTPURL(rawURL, isHTTPS, ".ts")
-}
-
-func ParseRTSPURL(rawURL string) (ctx URLContext, err error) {
-	ctx, err = ParseURL(rawURL, DefaultRTSPPort)
+func ParseRtspUrl(rawUrl string) (ctx UrlContext, err error) {
+	ctx, err = ParseUrl(rawUrl, -1)
 	if err != nil {
 		return
 	}
-	if ctx.Scheme != "rtsp" || ctx.Host == "" || ctx.Path == "" {
-		return ctx, ErrURL
+	// 注意，存在一种情况，使用rtsp pull session，直接拉取没有url path的流，所以不检查ctx.Path
+	if ctx.Scheme != "rtsp" || ctx.Host == "" {
+		return ctx, fmt.Errorf("%w. url=%s", ErrInvalidUrl, rawUrl)
 	}
 
 	return
 }
 
-func parseURLPath(stdURL *url.URL) (ctx URLPathContext, err error) {
-	ctx.Path = stdURL.Path
+func ParseHttpflvUrl(rawUrl string) (ctx UrlContext, err error) {
+	return parseHttpUrl(rawUrl, ".flv")
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+
+// ParseHttpRequest
+//
+// @return 完整url
+//
+func ParseHttpRequest(req *http.Request) string {
+	// TODO(chef): [refactor] scheme是否能从从req.URL.Scheme获取
+	var scheme string
+	if req.TLS == nil {
+		scheme = "http"
+	} else {
+		scheme = "https"
+	}
+	return fmt.Sprintf("%s://%s%s", scheme, req.Host, req.RequestURI)
+}
+
+// ----- private -------------------------------------------------------------------------------------------------------
+
+func parseUrlPath(stdUrl *url.URL) (ctx UrlPathContext, err error) {
+	ctx.Path = stdUrl.Path
 
 	index := strings.LastIndexByte(ctx.Path, '/')
 	if index == -1 {
@@ -173,7 +234,7 @@ func parseURLPath(stdURL *url.URL) (ctx URLPathContext, err error) {
 		ctx.LastItemOfPath = ctx.Path[index+1:]
 	}
 
-	ctx.RawQuery = stdURL.RawQuery
+	ctx.RawQuery = stdUrl.RawQuery
 
 	if ctx.RawQuery == "" {
 		ctx.PathWithRawQuery = ctx.Path
@@ -184,20 +245,13 @@ func parseURLPath(stdURL *url.URL) (ctx URLPathContext, err error) {
 	return ctx, nil
 }
 
-func ParseHTTPURL(rawURL string, isHTTPS bool, suffix string) (ctx URLContext, err error) {
-	var defaultPort int
-	if isHTTPS {
-		defaultPort = DefaultHTTPSPort
-	} else {
-		defaultPort = DefaultHTTPPort
-	}
-
-	ctx, err = ParseURL(rawURL, defaultPort)
+func parseHttpUrl(rawUrl string, filetype string) (ctx UrlContext, err error) {
+	ctx, err = ParseUrl(rawUrl, -1)
 	if err != nil {
 		return
 	}
-	if (ctx.Scheme != "http" && ctx.Scheme != "https") || ctx.Host == "" || ctx.Path == "" || !strings.HasSuffix(ctx.LastItemOfPath, suffix) {
-		return ctx, ErrURL
+	if (ctx.Scheme != "http" && ctx.Scheme != "https") || ctx.Host == "" || ctx.Path == "" || !strings.HasSuffix(ctx.LastItemOfPath, filetype) {
+		return ctx, fmt.Errorf("%w. url=%s", ErrInvalidUrl, rawUrl)
 	}
 
 	return

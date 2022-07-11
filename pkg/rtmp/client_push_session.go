@@ -19,15 +19,20 @@ type PushSession struct {
 type PushSessionOption struct {
 	// 从调用Push函数，到可以发送音视频数据的前一步，也即收到服务端返回的rtmp publish对应结果的信令的超时时间
 	// 如果为0，则没有超时时间
-	PushTimeoutMS int
+	PushTimeoutMs int
 
-	WriteAVTimeoutMS     int
+	WriteAvTimeoutMs     int
+	WriteBufSize         int // io层发送音视频数据的缓冲大小，如果为0，则没有缓冲
+	WriteChanSize        int // io层发送音视频数据的异步队列大小，如果为0，则同步发送
 	HandshakeComplexFlag bool
 }
 
 var defaultPushSessionOption = PushSessionOption{
-	PushTimeoutMS:    10000,
-	WriteAVTimeoutMS: 0,
+	PushTimeoutMs:        10000,
+	WriteAvTimeoutMs:     0,
+	WriteBufSize:         0,
+	WriteChanSize:        0,
+	HandshakeComplexFlag: false,
 }
 
 type ModPushSessionOption func(option *PushSessionOption)
@@ -39,77 +44,91 @@ func NewPushSession(modOptions ...ModPushSessionOption) *PushSession {
 	}
 	return &PushSession{
 		IsFresh: true,
-		core: NewClientSession(CSTPushSession, func(option *ClientSessionOption) {
-			option.DoTimeoutMS = opt.PushTimeoutMS
-			option.WriteAVTimeoutMS = opt.WriteAVTimeoutMS
+		core: NewClientSession(base.SessionTypeRtmpPush, func(option *ClientSessionOption) {
+			option.DoTimeoutMs = opt.PushTimeoutMs
+			option.WriteAvTimeoutMs = opt.WriteAvTimeoutMs
+			option.WriteBufSize = opt.WriteBufSize
+			option.WriteChanSize = opt.WriteChanSize
 			option.HandshakeComplexFlag = opt.HandshakeComplexFlag
 		}),
 	}
 }
 
-// 阻塞直到和对端完成推流前，握手部分的工作（也即收到RTMP Publish response），或者发生错误
-func (s *PushSession) Push(rawURL string) error {
-	return s.core.Do(rawURL)
+// Push 阻塞直到和对端完成推流前，握手部分的工作（也即收到RTMP Publish response），或者发生错误
+func (s *PushSession) Push(rawUrl string) error {
+	return s.core.Do(rawUrl)
 }
 
-// 发送数据
-// 注意，业务方需将数据打包成rtmp chunk格式后，再调用该函数发送
+// Write 发送数据
+//
+// @param msg: 注意，`msg`数据应该是已经打包成rtmp chunk格式的数据。这里的数据就对应socket发送的数据，内部不会再修改数据内容。
+//
 func (s *PushSession) Write(msg []byte) error {
 	return s.core.Write(msg)
 }
 
-// 将缓存的数据立即刷新发送
+// Flush 将缓存的数据立即刷新发送
 // 是否有缓存策略，请参见配置及内部实现
 func (s *PushSession) Flush() error {
 	return s.core.Flush()
 }
 
-// 文档请参考： interface IClientSessionLifecycle
+// ---------------------------------------------------------------------------------------------------------------------
+// IClientSessionLifecycle interface
+// ---------------------------------------------------------------------------------------------------------------------
+
+// Dispose 文档请参考： IClientSessionLifecycle interface
+//
 func (s *PushSession) Dispose() error {
 	return s.core.Dispose()
 }
 
-// 文档请参考： interface IClientSessionLifecycle
+// WaitChan 文档请参考： IClientSessionLifecycle interface
+//
 func (s *PushSession) WaitChan() <-chan error {
 	return s.core.WaitChan()
 }
 
-// 文档请参考： interface ISessionURLContext
-func (s *PushSession) URL() string {
-	return s.core.URL()
+// ---------------------------------------------------------------------------------------------------------------------
+
+// Url 文档请参考： interface ISessionUrlContext
+func (s *PushSession) Url() string {
+	return s.core.Url()
 }
 
-// 文档请参考： interface ISessionURLContext
+// AppName 文档请参考： interface ISessionUrlContext
 func (s *PushSession) AppName() string {
 	return s.core.AppName()
 }
 
-// 文档请参考： interface ISessionURLContext
+// StreamName 文档请参考： interface ISessionUrlContext
 func (s *PushSession) StreamName() string {
 	return s.core.StreamName()
 }
 
-// 文档请参考： interface ISessionURLContext
+// RawQuery 文档请参考： interface ISessionUrlContext
 func (s *PushSession) RawQuery() string {
 	return s.core.RawQuery()
 }
 
-// 文档请参考： interface IObject
+// UniqueKey 文档请参考： interface IObject
 func (s *PushSession) UniqueKey() string {
-	return s.core.uniqueKey
+	return s.core.UniqueKey()
 }
 
-// 文档请参考： interface ISessionStat
+// ----- ISessionStat --------------------------------------------------------------------------------------------------
+
+// GetStat 文档请参考： interface ISessionStat
 func (s *PushSession) GetStat() base.StatSession {
 	return s.core.GetStat()
 }
 
-// 文档请参考： interface ISessionStat
+// UpdateStat 文档请参考： interface ISessionStat
 func (s *PushSession) UpdateStat(intervalSec uint32) {
 	s.core.UpdateStat(intervalSec)
 }
 
-// 文档请参考： interface ISessionStat
+// IsAlive 文档请参考： interface ISessionStat
 func (s *PushSession) IsAlive() (readAlive, writeAlive bool) {
 	return s.core.IsAlive()
 }

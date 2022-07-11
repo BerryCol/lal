@@ -1,3 +1,160 @@
+#### v0.30.1 (2022-06-15)
+
+- [feat] HTTP-API：新增start/stop_relay_pull接口，支持rtmp和rtsp，支持设置超时时间，自动关闭，重试次数，rtsp类型等参数
+- [feat] HTTP-API：kick_session接口支持踢掉pub/sub/pull类型的session
+- [feat] HTTP-Notify：增加on_relay_pull_start和on_relay_pull_stop回调
+- [feat] HTTP-Notify：增加hls生成ts文件的事件回调
+- [feat] rtmp: client端支持rtmps加密传输
+- [feat] rtmp: client端支持adobe auth验证
+- [feat] rtsp: server端支持basic/digest auth验证
+- [feat] lalserver: 运行参数-p可设置当前工作路径
+- [feat] package gb28181: 大体完成ps协议解析
+- [feat] 新增remux.Rtmp2AvPacketRemuxer，方便和ffmpeg库协作
+- [fix] rtsp: 修复url path路径不存在时，url解析失败的问题
+- [fix] rtmp: 解析amf, object中嵌套object导致崩溃
+- [fix] rtmp: ChunkComposer的error日志中的对象写错导致崩溃
+- [fix] 修复rtmp转ts时，265判断错误
+- [fix] lalserver: 修复竞态条件下接收rtsp流崩溃的bug
+- [fix] lalserver: relay push判空错误导致崩溃
+- [chore] release发版时，增加arm32, arm64, macos arm对应的二进制文件
+- [refactor] 新增package h2645
+- [refactor] 将所有session的ISessionStat的实现聚合到BasicSessionStat
+- [refactor] rename HttpSubSession -> BasicHttpSubSession
+- [refactor] HTTP-API: 所有事件都包含的公共字段聚合到EventCommonInfo中
+- [opt] aac: 补全AscContext.samplingFrequencyIndex采样率的取值
+- [log] 访问非法HTTP-API路径时打印警告日志
+
+#### v0.29.1 (2022-05-03)
+
+- [feat] lalserver: 支持集成第三方协议的输入流 https://pengrl.com/#/customize_pub
+- [feat] rtmp: pull session增加ack应答，提高兼容性
+- [opt] rtsp: lalserver增加配置项`rtsp->out_wait_key_frame_flag`，用于控制发送rtsp数据时，是否等待关键帧再发送
+- [opt] 增强健壮性，检查rtmp消息长度有效性
+- [fix] 增强兼容性，rtmp转mpegts时，使用nalu中的sps和pps
+- [fix] lalserver鉴权: 修复rtmp拉流鉴权的问题
+- [fix] 解析H265类型不够全面，导致推流失败 #140
+- [fix] lalserver录制: 是否创建mpegts录制根目录由mpegts录制开关控制
+- [fix] demo: dispatch调度程序检测保活时间单位错误
+- [perf] mpegts: 加大内存预分配大小
+
+#### v0.28.0 (2022-03-27)
+
+- [feat] httpts: 支持gop缓冲，提高秒开 #129
+- [opt] hls: 增加delete_threshold配置，用于配置过期TS文件的保存时间 #120
+- [opt] rtsp sub 改为异步发送
+- [opt] lalserver: relay push增加超时检查，增加带宽统计
+- [opt] lalserver: relay pull的rtmp流也转换为rtsp
+- [opt] lalserver: rtsp sub也支持触发relay pull
+- [fix] aac: 支持22050采样频率，修复该频率下转rtsp失败的问题
+- [fix] avc: 增强兼容性，处理单个seq header中存在多个sps的情况 #135
+- [fix] mpegts: 修复单音频场景，有一帧音频重复的问题
+- [fix] rtsp: Basic auth的base64编码
+- [fix] rtsp: 增强容错性，修复rtmp输入流没有seq header时，rtmp转rtsp内崩溃的问题
+- [fix] lalserver: 优雅关闭pprof和http server
+- [perf] mpegts: 优化转换mpegts的性能
+- [refactor] 将转换mpegts的代码从package hls独立出来，移动到package remux中
+- [refactor] lalserver: 大幅重构logic.Group，为支持插件化做准备
+- [log] 支持独立设置单个pkg的日志配置 #62
+- [log] rtmp和rtsp收包时添加trace级别日志 #63
+- [log] rtmp: 优化定位问题的日志 #135
+- [test] innertest增加单音频，单视频，httpts sub的测试
+
+#### v0.27.1 (2022-01-23)
+
+- [feat] 新增simple auth鉴权功能，见文档： https://pengrl.com/lal/#/auth
+- [feat] httpflv: PullSession支持https，支持302跳转
+- [feat] rtmp: client类型的session新增方法用于配置WriteBuf和ReadBuf大小，以及WriteChanSize
+- [opt] rtmp: 收到ping request回应ping response
+- [fix] rtmp: 增强兼容性，当收到的rtmp message中aac seq header payload长度为0时忽略，避免崩溃 #116
+- [fix] rtmp: 增强兼容性，当收到的rtmp message中的payload长度为0时忽略 #112
+- [opt] rtsp: 增强兼容性，处理rtsp信令中header存在没有转义的\r\n的情况
+- [fix] rtsp: 增强兼容性，修复读取http返回header解析失败的bug #110
+- [opt] https: 增强兼容性，服务初始化失败时打印错误日志而不是退出程序
+- [opt] avc: 增强兼容性，分隔avcc格式的nal时，如果存在长度为0的nal则忽略
+- [fix] sdp: 增强兼容性，fmtp内发生换行时做兼容性处理
+- [fix] httpflv: 修复httpflv多级路径下无法播放的问题
+- [opt] 整理完所有error返回值，error信息更友好
+- [log] 通过配置文件控制group调试日志
+- [log] rtsp: client信令增加错误日志
+- [fix] 修复logic.Option.NotifyHandler首字母小写外部无法设置的问题
+- [refactor] 将logic包中的DummyAudioFilter, GopCache, LazyRtmpChunkDivider, LazyRtmpMsg2FlvTag移入remux中
+- [refactor] rtmp: base.Buffer移入naza中
+- [chore] CI: 迁移到github action，已支持linux，macos平台，Go1.14和Go1.17，每次push代码和每周定时触发，并自动提交docker hub镜像
+- [chore] 修复go vet signal unbound channel的警告
+- [test] 提高测试覆盖，目前lal测试覆盖超过60%，文档中增加测试覆盖率徽章
+- [test] innertest增加m3u8文件检测，增加http api
+- [test] 测试各session的ISessionUrlContext接口
+- [test] 修复base/url_test.go中的测试用例
+
+#### v0.26.0 (2021-10-24)
+
+- [perf] rtmp合并发送功能使用writev实现
+- [feat] 兼容性: 运行时动态检查所有配置项是否存在
+- [refactor] 可定制性: logic: 抽象出ILalServer接口；业务方可在自身代码中创建server，选择是否获取notify通知，以及使用api控制server
+- [refactor] 兼容性: 两个不太标准的sdp格式(a=fmtp的前面或后面有多余的分号)
+- [refactor] 兼容性: aac解析失败日志; 输入的rtp包格式错误; 输入的rtmp包格式错误; hls中分割nalu增加日志; base.HttpServerManager增加日志
+- [refactor] 兼容性: 再增加一个配置文件默认搜索地址
+- [refactor] 可读性: logic: ServerManager和Config不再作为全局变量使用；去除entry.go中间层；iface_impl.go移入innertest中；signal_xxx.go移入base中
+- [refactor] 易用性: demo/pullrtsp2pushrtsp: 抽象出RtspTunnel结构体，一个对象对应一个转推任务
+- [refactor] logic: 新增GroupManager，管理所有Group
+- [chore] 配置文件中httpflv和httpts的url_pattern初始值改为没有限制
+- [chore] 使用github actions做CI（替换掉之前的travisCI）
+- [chore] 修复build.sh在linux下获取git tag信息失败报错的问题；去掉单元测试时不必要的错误日志
+- [chore] 增加docker运行脚本run_docker.sh
+
+#### v0.25.0 (2021-08-28)
+
+- [feat] 为rtmp pub推流添加静音AAC音频(可动态检测是否需要添加；配置文件中可开启或关闭这个功能)
+- [feat] 优化和统一所有client类型session的使用方式：session由于内部或对端原因导致关闭，外部不再需要显式调用Dispose函数释放资源
+- [feat] 增强兼容性：rtsp digest auth时，如果缺少algorithm字段，回复时该字段默认设置为MD5
+- [refactor] package avc: 重新实现sps的解析
+- [refactor] 新增函数remux.FlvTag2RtmpChunks()
+- [refactor] 增强健壮性：package rtmp: 对端协议错误时，主动关闭对端连接而不是主动panic
+- [refactor] 整理logic/group的代码
+- [refactor] httpflv.Sub和httpts.Sub显式调用base.HttpSubSession的函数
+- [fix] rtsp信令打包中部分字段缺少空格
+- [chore] 增强易用性：修改配置文件中的默认配置：hls、flv、mpegts的文件输出地址由绝对路径/tmp修改为相对路径./lal_record
+
+#### v0.24.0 (2021-07-31)
+
+- [feat] lalserver支持用rtsp sub协议拉取rtmp的pub推流 (#97)
+- [feat] 新增demo pullrtmp2pushrtsp，可以从远端拉取rtmp流并使用rtsp转推出去 (#96)
+- [feat] package rtprtcp: 支持h264，h265，aac rtp打包 (#83)
+- [feat] package sdp: 支持sdp打包 (#82)
+- [fix] 确保rtsp sub拉流从关键帧开始发送数据，避免因此引起的花屏
+- [fix] rtsp: 提高兼容性。兼容rtsp auth同时存在Digest和Basic两种字段的情况
+- [fix] rtsp: 提高兼容性。兼容rtsp摄像头的sdp中包含aac，但是没有config字段（后续也没有aac rtp包）的情况
+- [fix] rtmp: 提高兼容性。兼容rtmp client session处理对端回复两次publish或play信令的情况
+- [fix] rtmp: 提高兼容性。修复没有解析amf object中null类型数据导致和其他rtmp开源服务无法建连的问题 (#102)
+- [fix] rtmp: 信令打包参考本地chunk size
+- [fix] rtsp: 修复rtsp sub session没有正常释放导致协程泄漏的问题
+- [fix] 修复lalserver arm32编译失败的问题 (#92)
+- [fix] 修复lalserver http服务全部配置为不使用时崩溃的问题 (#58)
+- [fix] 修复hls.Muxer没有设置回调会导致崩溃的问题 (#101)
+- [fix] 修复demo calcrtmpdelay码率计算大了5倍的问题 (#58)
+- [refactor] package httpflv: 新增FlvFilePump，可循环匀速读取flv文件
+- [refactor] package aac: 增加adts, asc, seqheader间的转换代码；重构了整个包
+- [refactor] package avc: 部分函数提供复用传入参数内存和新申请内存两种实现
+- [refactor] demo benchrtmpconnect: 关闭日志，超时时长改为30秒，优化建连时长小于1毫秒的展示 (#58)
+- [chore] 增加Dockerfile (#91)
+
+#### v0.23.0 (2021-06-06)
+
+- [feat] HTTP端口复用：HTTP-FLV, HTTP-TS, HLS可使用相同的监听端口。HTTPS也支持端口复用 #64
+- [feat] HTTPS：HTTP-FLV，HTTP-TS，HLS都支持HTTPS。WebSocket-FLV，WebSocket-TS都支持WebSockets #76
+- [feat] 配置HTTP流的URL路径: HTTP-FLV，HTTP-TS，HLS的URL路由路径可以在配置文件中配置 #77
+- [feat] RTMP支持合并发送 #84
+- [refactor] 重构整个项目的命名风格 #87
+- [fix] RTMP GOP缓存设置为0时，可能花屏 #86
+- [feat] 支持海康威视NVR、大华IPC的RTSP流（SDP不包含SPS、PPS等数据，而是通过RTP包发送） #74 #85
+- [feat] 配置灵活易用话。增加`default_http`。HTTP-FLV，HTTP-TS，HLS可以独立配置监听地址相关的项，也可以使用公共的`default_http`
+- [feat] HLS默认提供两种播放URL地址 #64
+- [refactor] package hls: 将HTTP URL路径格式，文件存储路径格式，文件命名格式，映射关系抽象出来，业务方可在外层实现IPathSolver接口做定制 #77
+- [feat] 增加几个默认的配置文件加载路径
+- [feat] package rtprtcp: 增加用于将H264 Nalu包切割成RTP包的代码 #83
+- [refactor] package avc: 增加拆分AnndexB和AVCC Nalu包的代码 #79
+- [refactor] 重构httpflv.SubSession和httpts.SubSession的重复代码
+
 #### v0.22.0 (2021-05-03)
 
 - [feat] 录制新增支持：flv和mpegts文件。 录制支持列表见： https://pengrl.com/lal/#/LALServer (#14)

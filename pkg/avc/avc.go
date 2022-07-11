@@ -9,14 +9,19 @@
 package avc
 
 import (
-	"errors"
+	"bytes"
 	"io"
+
+	"github.com/q191201771/lal/pkg/base"
+	"github.com/q191201771/naza/pkg/nazabytes"
+
+	"github.com/q191201771/naza/pkg/nazaerrors"
 
 	"github.com/q191201771/naza/pkg/bele"
 	"github.com/q191201771/naza/pkg/nazabits"
 )
 
-// AnnexB:
+// Annexb:
 //   keywords: MPEG-2 transport stream, ElementaryStream(ES),
 //   nalu with start code.
 //   e.g. ts
@@ -26,19 +31,20 @@ import (
 //   nalu with length prefix.
 //   e.g. rtmp, flv
 
-var ErrAVC = errors.New("lal.avc: fxxk")
-
 var (
-	NALUStartCode3 = []byte{0x0, 0x0, 0x1}
-	NALUStartCode4 = []byte{0x0, 0x0, 0x0, 0x1}
+	NaluStartCode3 = []byte{0x0, 0x0, 0x1}
+	NaluStartCode4 = []byte{0x0, 0x0, 0x0, 0x1}
 
-	// aud nalu
-	AUDNALU = []byte{0x00, 0x00, 0x00, 0x01, 0x09, 0xf0}
+	// AudNalu aud nalu
+	AudNalu = []byte{0x00, 0x00, 0x00, 0x01, 0x09, 0xf0}
 )
 
+// NaluTypeMapping
+//
 // H.264-AVC-ISO_IEC_14496-15.pdf
 // Table 1 - NAL unit types in elementary streams
-var NALUTypeMapping = map[uint8]string{
+//
+var NaluTypeMapping = map[uint8]string{
 	1:  "SLICE",
 	5:  "IDR",
 	6:  "SEI",
@@ -62,21 +68,21 @@ var SliceTypeMapping = map[uint8]string{
 }
 
 const (
-	NALUTypeSlice    uint8 = 1
-	NALUTypeIDRSlice uint8 = 5
-	NALUTypeSEI      uint8 = 6
-	NALUTypeSPS      uint8 = 7
-	NALUTypePPS      uint8 = 8
-	NALUTypeAUD      uint8 = 9  // Access Unit Delimiter
-	NALUTypeFD       uint8 = 12 // Filler Data
+	NaluTypeSlice    uint8 = 1
+	NaluTypeIdrSlice uint8 = 5
+	NaluTypeSei      uint8 = 6
+	NaluTypeSps      uint8 = 7
+	NaluTypePps      uint8 = 8
+	NaluTypeAud      uint8 = 9  // Access Unit Delimiter
+	NaluTypeFd       uint8 = 12 // Filler Data
 )
 
 const (
 	SliceTypeP  uint8 = 0
 	SliceTypeB  uint8 = 1
 	SliceTypeI  uint8 = 2
-	SliceTypeSP uint8 = 3
-	SliceTypeSI uint8 = 4
+	SliceTypeSp uint8 = 3
+	SliceTypeSi uint8 = 4
 )
 
 type Context struct {
@@ -86,59 +92,74 @@ type Context struct {
 	Height  uint32
 }
 
+// DecoderConfigurationRecord
+//
 // H.264-AVC-ISO_IEC_14496-15.pdf
 // 5.2.4 Decoder configuration information
+//
 type DecoderConfigurationRecord struct {
 	ConfigurationVersion uint8
-	AVCProfileIndication uint8
+	AvcProfileIndication uint8
 	ProfileCompatibility uint8
-	AVCLevelIndication   uint8
+	AvcLevelIndication   uint8
 	LengthSizeMinusOne   uint8
-	NumOfSPS             uint8
-	SPSLength            uint16
-	NumOfPPS             uint8
-	PPSLength            uint16
+	NumOfSps             uint8
+	SpsLength            uint16
+	NumOfPps             uint8
+	PpsLength            uint16
 }
 
+// Sps
+//
 // ISO-14496-10.pdf
 // 7.3.2.1 Sequence parameter set RBSP syntax
 // 7.4.2.1 Sequence parameter set RBSP semantics
-type SPS struct {
-	ProfileIdc                     uint8
-	ConstraintSet0Flag             uint8
-	ConstraintSet1Flag             uint8
-	ConstraintSet2Flag             uint8
-	LevelIdc                       uint8
-	SPSId                          uint32
-	ChromaFormatIdc                uint32
-	ResidualColorTransformFlag     uint8
-	BitDepthLuma                   uint32
-	BitDepthChroma                 uint32
-	TransFormBypass                uint8
-	Log2MaxFrameNumMinus4          uint32
-	PicOrderCntType                uint32
-	Log2MaxPicOrderCntLsb          uint32
+//
+type Sps struct {
+	ProfileIdc         uint8
+	ConstraintSet0Flag uint8
+	ConstraintSet1Flag uint8
+	ConstraintSet2Flag uint8
+	LevelIdc           uint8
+	SpsId              uint32
+
+	ChromaFormatIdc            uint32
+	ResidualColorTransformFlag uint8
+	BitDepthLuma               uint32
+	BitDepthChroma             uint32
+	TransFormBypass            uint8
+
+	Log2MaxFrameNumMinus4 uint32
+	PicOrderCntType       uint32
+	Log2MaxPicOrderCntLsb uint32
+
 	NumRefFrames                   uint32 // num_ref_frames
 	GapsInFrameNumValueAllowedFlag uint8  // gaps_in_frame_num_value_allowed_flag
 	PicWidthInMbsMinusOne          uint32 // pic_width_in_mbs_minus1
 	PicHeightInMapUnitsMinusOne    uint32 // pic_height_in_map_units_minus1
-	FrameMbsOnlyFlag               uint8  // frame_mbs_only_flag
-	MbAdaptiveFrameFieldFlag       uint8  // mb_adaptive_frame_field_flag
-	Direct8X8InferenceFlag         uint8  // direct_8x8_inference_flag
-	FrameCroppingFlag              uint8  // frame_cropping_flag
-	FrameCropLeftOffset            uint32 // frame_crop_left_offset
-	FrameCropRightOffset           uint32 // frame_crop_right_offset
-	FrameCropTopOffset             uint32 // frame_crop_top_offset
-	FrameCropBottomOffset          uint32 // frame_crop_bottom_offset
+
+	FrameMbsOnlyFlag         uint8 // frame_mbs_only_flag
+	MbAdaptiveFrameFieldFlag uint8 // mb_adaptive_frame_field_flag
+
+	Direct8X8InferenceFlag uint8 // direct_8x8_inference_flag
+
+	FrameCroppingFlag     uint8  // frame_cropping_flag
+	FrameCropLeftOffset   uint32 // frame_crop_left_offset
+	FrameCropRightOffset  uint32 // frame_crop_right_offset
+	FrameCropTopOffset    uint32 // frame_crop_top_offset
+	FrameCropBottomOffset uint32 // frame_crop_bottom_offset
+
+	SarNum int
+	SarDen int
 }
 
-func ParseNALUType(v uint8) uint8 {
+func ParseNaluType(v uint8) uint8 {
 	return v & 0x1f
 }
 
 func ParseSliceType(nalu []byte) (uint8, error) {
 	if len(nalu) < 2 {
-		return 0, ErrAVC
+		return 0, nazaerrors.Wrap(base.ErrShortBuffer)
 	}
 
 	br := nazabits.NewBitReader(nalu[1:])
@@ -155,7 +176,7 @@ func ParseSliceType(nalu []byte) (uint8, error) {
 
 	// range: [0, 9]
 	if sliceType > 9 {
-		return 0, ErrAVC
+		return 0, nazaerrors.Wrap(base.ErrAvc)
 	}
 
 	if sliceType > 4 {
@@ -164,9 +185,9 @@ func ParseSliceType(nalu []byte) (uint8, error) {
 	return uint8(sliceType), nil
 }
 
-func ParseNALUTypeReadable(v uint8) string {
-	t := ParseNALUType(v)
-	ret, ok := NALUTypeMapping[t]
+func ParseNaluTypeReadable(v uint8) string {
+	t := ParseNaluType(v)
+	ret, ok := NaluTypeMapping[t]
 	if !ok {
 		return "unknown"
 	}
@@ -174,15 +195,15 @@ func ParseNALUTypeReadable(v uint8) string {
 }
 
 func ParseSliceTypeReadable(nalu []byte) (string, error) {
-	naluType := ParseNALUType(nalu[0])
+	naluType := ParseNaluType(nalu[0])
 
 	// 这些类型不属于视频帧数据类型，没有slice type
 	switch naluType {
-	case NALUTypeSEI:
+	case NaluTypeSei:
 		fallthrough
-	case NALUTypeSPS:
+	case NaluTypeSps:
 		fallthrough
-	case NALUTypePPS:
+	case NaluTypePps:
 		return "", nil
 	}
 
@@ -192,88 +213,118 @@ func ParseSliceTypeReadable(nalu []byte) (string, error) {
 	}
 	ret, ok := SliceTypeMapping[t]
 	if !ok {
-		return "unknown", ErrAVC
+		return "unknown", nazaerrors.Wrap(base.ErrAvc)
 	}
 	return ret, nil
 }
 
-// AVCC Seq Header -> AnnexB
+// SpsPpsSeqHeader2Annexb
 //
-// @param payload: rtmp message的payload部分或者flv tag的payload部分
-//                 注意，包含了头部2字节类型以及3字节的cts
+// AVCC Seq Header -> Annexb
 //
-// @return 注意，返回的内存块为独立的内存块，不依赖指向传输参数<payload>内存块
+// @param payload:
+//  rtmp message的payload部分或者flv tag的payload部分。
+//  注意，包含了头部2字节类型以及3字节的cts。
 //
-func SPSPPSSeqHeader2AnnexB(payload []byte) ([]byte, error) {
-	sps, pps, err := ParseSPSPPSFromSeqHeader(payload)
+// @return 返回的内存块为内部独立新申请。
+//
+func SpsPpsSeqHeader2Annexb(payload []byte) ([]byte, error) {
+	// TODO(chef): [refactor] 这里没有使用 ParseSpsPpsFromSeqHeaderWithoutMalloc
+	// 因为遇到了sps>1个的情况
+	// 需要重构相关的代码
+
+	spsList, ppsList, err := parseSpsPpsListFromSeqHeaderWithoutMalloc(payload)
 	if err != nil {
-		return nil, ErrAVC
+		return nil, err
 	}
-	var ret []byte
-	ret = append(ret, NALUStartCode4...)
-	ret = append(ret, sps...)
-	ret = append(ret, NALUStartCode4...)
-	ret = append(ret, pps...)
+	ret := make([]byte, len(payload))
+	ret = ret[0:0]
+
+	for _, item := range spsList {
+		ret = append(ret, NaluStartCode4...)
+		ret = append(ret, item...)
+	}
+	for _, item := range ppsList {
+		ret = append(ret, NaluStartCode4...)
+		ret = append(ret, item...)
+	}
 	return ret, nil
 }
 
+// ParseSpsPpsFromSeqHeader
+//
+// 见func ParseSpsPpsFromSeqHeaderWithoutMalloc
+//
+// @return sps, pps: 内存块为内部独立新申请
+//
+func ParseSpsPpsFromSeqHeader(payload []byte) (sps, pps []byte, err error) {
+	s, p, e := ParseSpsPpsFromSeqHeaderWithoutMalloc(payload)
+	if e != nil {
+		return nil, nil, e
+	}
+	sps = append(sps, s...)
+	pps = append(pps, p...)
+	return
+}
+
+// ParseSpsPpsFromSeqHeaderWithoutMalloc
+//
 // 从AVCC格式的Seq Header中得到SPS和PPS内存块
 //
 // @param payload: rtmp message的payload部分或者flv tag的payload部分
 //                 注意，包含了头部2字节类型以及3字节的cts
 //
-// @return 注意，返回的sps，pps内存块指向的是传入参数<payload>内存块的内存
+// @return sps, pps: 复用传入参数`payload`的内存块
 //
-func ParseSPSPPSFromSeqHeader(payload []byte) (sps, pps []byte, err error) {
-	if len(payload) < 5 {
-		return nil, nil, ErrAVC
+func ParseSpsPpsFromSeqHeaderWithoutMalloc(payload []byte) (sps, pps []byte, err error) {
+	if len(payload) < 13 {
+		return nil, nil, nazaerrors.Wrap(base.ErrShortBuffer)
 	}
 	if payload[0] != 0x17 || payload[1] != 0x00 || payload[2] != 0 || payload[3] != 0 || payload[4] != 0 {
-		return nil, nil, ErrAVC
-	}
-
-	if len(payload) < 13 {
-		return nil, nil, ErrAVC
+		return nil, nil, nazaerrors.Wrap(base.ErrAvc)
 	}
 
 	index := 10
-	numOfSPS := int(payload[index] & 0x1F)
+	numOfSps := int(payload[index] & 0x1F)
 	index++
-	if numOfSPS != 1 {
-		return nil, nil, ErrAVC
+	if numOfSps != 1 {
+		return nil, nil, nazaerrors.Wrap(base.ErrAvc)
 	}
-	spsLength := int(bele.BEUint16(payload[index:]))
+	spsLength := int(bele.BeUint16(payload[index:]))
 	index += 2
 
 	if len(payload) < 13+spsLength {
-		return nil, nil, ErrAVC
+		return nil, nil, nazaerrors.Wrap(base.ErrShortBuffer)
 	}
 
 	sps = payload[index : index+spsLength]
 	index += spsLength
 
 	if len(payload) < 16+spsLength {
-		return nil, nil, ErrAVC
+		return nil, nil, nazaerrors.Wrap(base.ErrShortBuffer)
 	}
 
-	numOfPPS := int(payload[index] & 0x1F)
+	numOfPps := int(payload[index] & 0x1F)
 	index++
-	if numOfPPS != 1 {
-		return nil, nil, ErrAVC
+	if numOfPps != 1 {
+		return nil, nil, nazaerrors.Wrap(base.ErrAvc)
 	}
-	ppsLength := int(bele.BEUint16(payload[index:]))
+	ppsLength := int(bele.BeUint16(payload[index:]))
 	index += 2
 
 	if len(payload) < 16+spsLength+ppsLength {
-		return nil, nil, ErrAVC
+		return nil, nil, nazaerrors.Wrap(base.ErrShortBuffer)
 	}
 
 	pps = payload[index : index+ppsLength]
 	return
 }
 
-// 返回的内存块为新申请的独立内存块
-func BuildSeqHeaderFromSPSPPS(sps, pps []byte) ([]byte, error) {
+// BuildSeqHeaderFromSpsPps
+//
+// @return 内存块为内部独立新申请
+//
+func BuildSeqHeaderFromSpsPps(sps, pps []byte) ([]byte, error) {
 	var sh []byte
 	sh = make([]byte, 16+len(sps)+len(pps))
 	sh[0] = 0x17
@@ -287,13 +338,13 @@ func BuildSeqHeaderFromSPSPPS(sps, pps []byte) ([]byte, error) {
 	sh[5] = 0x1 // configurationVersion
 
 	var ctx Context
-	if err := ParseSPS(sps, &ctx); err != nil {
+	if err := ParseSps(sps, &ctx); err != nil {
 		return nil, err
 	}
 
-	sh[6] = ctx.Profile // AVCProfileIndication
+	sh[6] = ctx.Profile // AvcProfileIndication
 	sh[7] = 0           // profile_compatibility
-	sh[8] = ctx.Level   // AVCLevelIndication
+	sh[8] = ctx.Level   // AvcLevelIndication
 	sh[9] = 0xFF        // lengthSizeMinusOne '111111'b | (4-1)
 	sh[10] = 0xE1       // numOfSequenceParameterSets '111'b | 1
 
@@ -316,15 +367,17 @@ func BuildSeqHeaderFromSPSPPS(sps, pps []byte) ([]byte, error) {
 	return sh, nil
 }
 
-// AVCC -> AnnexB
+// CaptureAvcc2Annexb
+//
+// AVCC -> Annexb
 //
 // @param payload: rtmp message的payload部分或者flv tag的payload部分
 //                 注意，包含了头部2字节类型以及3字节的cts
 //
-func CaptureAVCC2AnnexB(w io.Writer, payload []byte) error {
+func CaptureAvcc2Annexb(w io.Writer, payload []byte) error {
 	// sps pps
 	if payload[0] == 0x17 && payload[1] == 0x00 {
-		spspps, err := SPSPPSSeqHeader2AnnexB(payload)
+		spspps, err := SpsPpsSeqHeader2Annexb(payload)
 		if err != nil {
 			return err
 		}
@@ -332,11 +385,12 @@ func CaptureAVCC2AnnexB(w io.Writer, payload []byte) error {
 		return nil
 	}
 
+	// TODO(chef): [refactor] 使用IterateNaluAvcc
 	// payload中可能存在多个nalu
 	for i := 5; i != len(payload); {
-		naluLen := int(bele.BEUint32(payload[i:]))
+		naluLen := int(bele.BeUint32(payload[i:]))
 		i += 4
-		_, _ = w.Write(NALUStartCode4)
+		_, _ = w.Write(NaluStartCode4)
 		_, _ = w.Write(payload[i : i+naluLen])
 		i += naluLen
 		break
@@ -344,6 +398,8 @@ func CaptureAVCC2AnnexB(w io.Writer, payload []byte) error {
 	return nil
 }
 
+// IterateNaluStartCode
+//
 // 遍历直到找到第一个nalu start code的位置
 //
 // @param start: 从`nalu`的start位置开始查找
@@ -352,7 +408,7 @@ func CaptureAVCC2AnnexB(w io.Writer, payload []byte) error {
 //         length: start code的长度，可能是3或者4
 //         注意，如果找不到start code，则返回-1, -1
 //
-func IterateNALUStartCode(nalu []byte, start int) (pos, length int) {
+func IterateNaluStartCode(nalu []byte, start int) (pos, length int) {
 	if nalu == nil || start >= len(nalu) {
 		return -1, -1
 	}
@@ -373,54 +429,63 @@ func IterateNALUStartCode(nalu []byte, start int) (pos, length int) {
 	return -1, -1
 }
 
-// 遍历AnnexB格式，去掉start code，获取nal包，正常情况下可能为1个或多个，异常情况下可能一个也没有
+// SplitNaluAnnexb
+//
+// 遍历Annexb格式，去掉start code，获取nal包，正常情况下可能为1个或多个，异常情况下可能一个也没有
 //
 // 具体见单元测试
 //
-func SplitNALUAnnexB(nals []byte) (nalList [][]byte, err error) {
-	err = IterateNALUAnnexB(nals, func(nal []byte) {
+// @return nalList: 内存块元素引用输入参数`nals`的内存
+//
+func SplitNaluAnnexb(nals []byte) (nalList [][]byte, err error) {
+	err = IterateNaluAnnexb(nals, func(nal []byte) {
 		nalList = append(nalList, nal)
 	})
 	return
 }
 
+// SplitNaluAvcc
+//
 // 遍历AVCC格式，去掉4字节长度，获取nal包，正常情况下可能返回1个或多个，异常情况下可能一个也没有
 //
 // 具体见单元测试
 //
-func SplitNALUAVCC(nals []byte) (nalList [][]byte, err error) {
-	err = IterateNALUAVCC(nals, func(nal []byte) {
+func SplitNaluAvcc(nals []byte) (nalList [][]byte, err error) {
+	err = IterateNaluAvcc(nals, func(nal []byte) {
 		nalList = append(nalList, nal)
 	})
 	return
-
 }
 
-func IterateNALUAnnexB(nals []byte, handler func(nal []byte)) error {
+// IterateNaluAnnexb
+//
+// @param handler: 回调函数中的`nal`参数引用`nals`中的内存
+//
+func IterateNaluAnnexb(nals []byte, handler func(nal []byte)) error {
 	if nals == nil {
-		return ErrAVC
+		return nazaerrors.Wrap(base.ErrShortBuffer)
 	}
-	prePos, preLength := IterateNALUStartCode(nals, 0)
+	prePos, preLength := IterateNaluStartCode(nals, 0)
 	if prePos == -1 {
 		handler(nals)
-		return ErrAVC
+		return nazaerrors.Wrap(base.ErrAvc)
 	}
 
 	for {
 		start := prePos + preLength
-		pos, length := IterateNALUStartCode(nals, start)
+		pos, length := IterateNaluStartCode(nals, start)
 		if pos == -1 {
 			if start < len(nals) {
 				handler(nals[start:])
 				return nil
 			} else {
-				return ErrAVC
+				return nazaerrors.Wrap(base.ErrAvc)
 			}
 		}
 		if start < pos {
 			handler(nals[start:pos])
 		} else {
-			return ErrAVC
+			return nazaerrors.Wrap(base.ErrAvc)
 		}
 
 		prePos = pos
@@ -428,34 +493,137 @@ func IterateNALUAnnexB(nals []byte, handler func(nal []byte)) error {
 	}
 }
 
-func IterateNALUAVCC(nals []byte, handler func(nal []byte)) error {
+func IterateNaluAvcc(nals []byte, handler func(nal []byte)) error {
 	if nals == nil {
-		return ErrAVC
+		return nazaerrors.Wrap(base.ErrShortBuffer)
 	}
 	pos := 0
 	for {
 		if len(nals[pos:]) < 4 {
-			return ErrAVC
+			return nazaerrors.Wrap(base.ErrShortBuffer)
 		}
-		length := int(bele.BEUint32(nals[pos:]))
+		length := int(bele.BeUint32(nals[pos:]))
 		pos += 4
 		if pos == len(nals) {
-			return ErrAVC
+			return nazaerrors.Wrap(base.ErrShortBuffer)
 		}
 		epos := pos + length
 		if epos < len(nals) {
 			// 非最后一个
+
+			// length为0的直接过滤掉
+			if length == 0 {
+				Log.Warnf("avcc nalu length equal 0. nals=%s", nazabytes.Prefix(nals, 128))
+				continue
+			}
 			handler(nals[pos:epos])
 			pos += length
 		} else if epos == len(nals) {
 			// 最后一个
+
+			if length == 0 {
+				Log.Warnf("avcc nalu length equal 0. nals=%s", nazabytes.Prefix(nals, 128))
+				continue
+			}
 			handler(nals[pos:epos])
 			return nil
 		} else {
 			handler(nals[pos:])
-			return ErrAVC
+			return nazaerrors.Wrap(base.ErrShortBuffer)
 		}
 	}
 }
 
-// TODO(chef): 是否需要 func NALUAVCC2AnnexB, func NALUAnnexB2AVCC
+func Avcc2Annexb(nals []byte) ([]byte, error) {
+	ret := make([]byte, len(nals))
+	ret = ret[0:0]
+	err := IterateNaluAvcc(nals, func(nal []byte) {
+		ret = append(ret, NaluStartCode4...)
+		ret = append(ret, nal...)
+	})
+	return ret, err
+}
+
+func Annexb2Avcc(nals []byte) ([]byte, error) {
+	var buf nazabytes.Buffer
+	buf.Grow(len(nals))
+	err := IterateNaluAnnexb(nals, func(nal []byte) {
+		bele.BePutUint32(buf.ReserveBytes(4), uint32(len(nal)))
+		buf.Flush(4)
+		_, _ = buf.Write(nal)
+	})
+	return buf.Bytes(), err
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+
+// parseSpsPpsListFromSeqHeaderWithoutMalloc
+//
+// 从AVCC格式的Seq Header中得到SPS和PPS内存块
+//
+// @param payload:
+//  rtmp message的payload部分或者flv tag的payload部分。
+//  注意，包含了头部2字节类型以及3字节的cts。
+//
+// @return spsList, ppsList:
+//  复用传入参数`payload`的内存块
+//
+func parseSpsPpsListFromSeqHeaderWithoutMalloc(payload []byte) (spsList, ppsList [][]byte, err error) {
+	if len(payload) < 5 {
+		return nil, nil, nazaerrors.Wrap(base.ErrShortBuffer)
+	}
+	expected := []byte{0x17, 0, 0, 0, 0}
+	if !bytes.Equal(payload[:5], expected) {
+		return nil, nil, nazaerrors.Wrap(base.ErrAvc)
+	}
+
+	b := nazabits.NewBitReader(payload)
+	// skip 10
+	if _, err = b.ReadBytes(10); err != nil {
+		return nil, nil, err
+	}
+
+	// pps和sps的逻辑一样，再一套一层循环处理
+	var v8 uint8
+	var vbs []byte
+
+	if v8, err = b.ReadBits8(8); err != nil {
+		return nil, nil, err
+	}
+	numOfSps := int(v8 & 0x1F)
+	spsList = make([][]byte, numOfSps)
+
+	for j := 0; j < numOfSps; j++ {
+		// TODO(chef): 考虑nazabits中支持网络序操作
+		if vbs, err = b.ReadBytes(2); err != nil {
+			return nil, nil, err
+		}
+
+		spsLength := uint(bele.BeUint16(vbs))
+		if vbs, err = b.ReadBytes(spsLength); err != nil {
+			return nil, nil, err
+		}
+		spsList[j] = vbs
+	}
+
+	// pps和sps的读取逻辑一样
+	if v8, err = b.ReadBits8(8); err != nil {
+		return nil, nil, err
+	}
+	numOfPps := int(v8 & 0x1F)
+	ppsList = make([][]byte, numOfPps)
+
+	for j := 0; j < numOfPps; j++ {
+		if vbs, err = b.ReadBytes(2); err != nil {
+			return nil, nil, err
+		}
+
+		ppsLength := uint(bele.BeUint16(vbs))
+		if vbs, err = b.ReadBytes(ppsLength); err != nil {
+			return nil, nil, err
+		}
+		ppsList[j] = vbs
+	}
+
+	return
+}

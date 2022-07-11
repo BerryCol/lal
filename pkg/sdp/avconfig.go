@@ -10,41 +10,33 @@ package sdp
 
 import (
 	"encoding/base64"
-	"strconv"
+	"encoding/hex"
 	"strings"
+
+	"github.com/q191201771/naza/pkg/nazaerrors"
 
 	"github.com/q191201771/lal/pkg/base"
 )
 
-func ParseASC(a *AFmtPBase) ([]byte, error) {
-	if a.Format != base.RTPPacketTypeAAC {
-		return nil, ErrSDP
+func ParseAsc(a *AFmtPBase) ([]byte, error) {
+	if a.Format != base.RtpPacketTypeAac {
+		return nil, nazaerrors.Wrap(base.ErrSdp)
 	}
 
 	v, ok := a.Parameters["config"]
 	if !ok {
-		return nil, ErrSDP
+		return nil, nazaerrors.Wrap(base.ErrSdp)
 	}
 	if len(v) < 4 || (len(v)%2) != 0 {
-		return nil, ErrSDP
+		return nil, nazaerrors.Wrap(base.ErrSdp)
 	}
-	l := len(v) / 2
-	r := make([]byte, l)
-	for i := 0; i < l; i++ {
-		b, err := strconv.ParseInt(v[i*2:i*2+2], 16, 0)
-		if err != nil {
-			return nil, ErrSDP
-		}
-		r[i] = uint8(b)
-	}
-
-	return r, nil
+	return hex.DecodeString(v)
 }
 
-func ParseVPSSPSPPS(a *AFmtPBase) (vps, sps, pps []byte, err error) {
+func ParseVpsSpsPps(a *AFmtPBase) (vps, sps, pps []byte, err error) {
 	v, ok := a.Parameters["sprop-vps"]
 	if !ok {
-		return nil, nil, nil, ErrSDP
+		return nil, nil, nil, nazaerrors.Wrap(base.ErrSdp)
 	}
 	if vps, err = base64.StdEncoding.DecodeString(v); err != nil {
 		return nil, nil, nil, err
@@ -52,7 +44,7 @@ func ParseVPSSPSPPS(a *AFmtPBase) (vps, sps, pps []byte, err error) {
 
 	v, ok = a.Parameters["sprop-sps"]
 	if !ok {
-		return nil, nil, nil, ErrSDP
+		return nil, nil, nil, nazaerrors.Wrap(base.ErrSdp)
 	}
 	if sps, err = base64.StdEncoding.DecodeString(v); err != nil {
 		return nil, nil, nil, err
@@ -60,7 +52,7 @@ func ParseVPSSPSPPS(a *AFmtPBase) (vps, sps, pps []byte, err error) {
 
 	v, ok = a.Parameters["sprop-pps"]
 	if !ok {
-		return nil, nil, nil, ErrSDP
+		return nil, nil, nil, nazaerrors.Wrap(base.ErrSdp)
 	}
 	if pps, err = base64.StdEncoding.DecodeString(v); err != nil {
 		return nil, nil, nil, err
@@ -69,22 +61,25 @@ func ParseVPSSPSPPS(a *AFmtPBase) (vps, sps, pps []byte, err error) {
 	return
 }
 
+// ParseSpsPps
+//
 // 解析AVC/H264的sps，pps
 // 例子见单元测试
-func ParseSPSPPS(a *AFmtPBase) (sps, pps []byte, err error) {
+//
+func ParseSpsPps(a *AFmtPBase) (sps, pps []byte, err error) {
 	v, ok := a.Parameters["sprop-parameter-sets"]
 	if !ok {
-		return nil, nil, ErrSDP
+		return nil, nil, nazaerrors.Wrap(base.ErrSdp)
 	}
 
 	items := strings.SplitN(v, ",", 2)
 	if len(items) != 2 {
-		return nil, nil, ErrSDP
+		return nil, nil, nazaerrors.Wrap(base.ErrSdp)
 	}
 
 	sps, err = base64.StdEncoding.DecodeString(items[0])
 	if err != nil {
-		return nil, nil, ErrSDP
+		return nil, nil, nazaerrors.Wrap(base.ErrSdp)
 	}
 
 	pps, err = base64.StdEncoding.DecodeString(items[1])

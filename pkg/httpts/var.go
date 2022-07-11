@@ -8,7 +8,11 @@
 
 package httpts
 
+import "github.com/q191201771/naza/pkg/nazalog"
+
 var (
 	SubSessionWriteChanSize  = 1024
-	SubSessionWriteTimeoutMS = 10000
+	SubSessionWriteTimeoutMs = 10000
+
+	Log = nazalog.GetGlobalLogger()
 )

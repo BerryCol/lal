@@ -13,50 +13,107 @@ import (
 
 	"github.com/q191201771/lal/pkg/base"
 	"github.com/q191201771/naza/pkg/connection"
-	"github.com/q191201771/naza/pkg/nazalog"
 )
 
-var tsHTTPResponseHeader []byte
+var tsHttpResponseHeader []byte
 
 type SubSession struct {
-	*base.HTTPSubSession // 直接使用它提供的函数
-	IsFresh              bool
+	core               *base.BasicHttpSubSession
+	IsFresh            bool
+	ShouldWaitBoundary bool
 }
 
-func NewSubSession(conn net.Conn, urlCtx base.URLContext, isWebSocket bool, websocketKey string) *SubSession {
-	uk := base.GenUKTSSubSession()
+func NewSubSession(conn net.Conn, urlCtx base.UrlContext, isWebSocket bool, websocketKey string) *SubSession {
 	s := &SubSession{
-		base.NewHTTPSubSession(base.HTTPSubSessionOption{
+		core: base.NewBasicHttpSubSession(base.BasicHttpSubSessionOption{
 			Conn: conn,
 			ConnModOption: func(option *connection.Option) {
 				option.WriteChanSize = SubSessionWriteChanSize
-				option.WriteTimeoutMS = SubSessionWriteTimeoutMS
+				option.WriteTimeoutMs = SubSessionWriteTimeoutMs
 			},
-			UK:           uk,
-			Protocol:     base.ProtocolHTTPTS,
-			URLCtx:       urlCtx,
+			SessionType:  base.SessionTypeTsSub,
+			UrlCtx:       urlCtx,
 			IsWebSocket:  isWebSocket,
 			WebSocketKey: websocketKey,
 		}),
-		true,
+		IsFresh:            true,
+		ShouldWaitBoundary: true,
 	}
-	nazalog.Infof("[%s] lifecycle new httpts SubSession. session=%p, remote addr=%s", uk, s, conn.RemoteAddr().String())
+	Log.Infof("[%s] lifecycle new httpts SubSession. session=%p, remote addr=%s", s.UniqueKey(), s, conn.RemoteAddr().String())
 	return s
 }
 
-func (session *SubSession) WriteHTTPResponseHeader() {
-	nazalog.Debugf("[%s] > W http response header.", session.UniqueKey())
-	session.HTTPSubSession.WriteHTTPResponseHeader(tsHTTPResponseHeader)
+// ---------------------------------------------------------------------------------------------------------------------
+// IServerSessionLifecycle interface
+// ---------------------------------------------------------------------------------------------------------------------
+
+func (session *SubSession) RunLoop() error {
+	return session.core.RunLoop()
 }
 
 func (session *SubSession) Dispose() error {
-	nazalog.Infof("[%s] lifecycle dispose httpts SubSession.", session.UniqueKey())
-	return session.HTTPSubSession.Dispose()
+	Log.Infof("[%s] lifecycle dispose httpts SubSession.", session.core.UniqueKey())
+	return session.core.Dispose()
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+
+func (session *SubSession) WriteHttpResponseHeader() {
+	Log.Debugf("[%s] > W http response header.", session.core.UniqueKey())
+	session.core.WriteHttpResponseHeader(tsHttpResponseHeader)
+}
+
+func (session *SubSession) Write(b []byte) {
+	session.core.Write(b)
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// IObject interface
+// ---------------------------------------------------------------------------------------------------------------------
+
+func (session *SubSession) UniqueKey() string {
+	return session.core.UniqueKey()
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// ISessionUrlContext interface
+// ---------------------------------------------------------------------------------------------------------------------
+
+func (session *SubSession) Url() string {
+	return session.core.Url()
+}
+
+func (session *SubSession) AppName() string {
+	return session.core.AppName()
+}
+
+func (session *SubSession) StreamName() string {
+	return session.core.StreamName()
+}
+
+func (session *SubSession) RawQuery() string {
+	return session.core.RawQuery()
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// ISessionStat interface
+// ---------------------------------------------------------------------------------------------------------------------
+
+func (session *SubSession) UpdateStat(intervalSec uint32) {
+	session.core.UpdateStat(intervalSec)
+}
+
+func (session *SubSession) GetStat() base.StatSession {
+	return session.core.GetStat()
+}
+
+func (session *SubSession) IsAlive() (readAlive, writeAlive bool) {
+	return session.core.IsAlive()
 }
 
 func init() {
-	tsHTTPResponseHeaderStr := "HTTP/1.1 200 OK\r\n" +
-		"Server: " + base.LALHTTPTSSubSessionServer + "\r\n" +
+	tsHttpResponseHeaderStr := "HTTP/1.1 200 OK\r\n" +
+		"Server: " + base.LalHttptsSubSessionServer + "\r\n" +
 		"Cache-Control: no-cache\r\n" +
 		"Content-Type: video/mp2t\r\n" +
 		"Connection: close\r\n" +
@@ -66,5 +123,5 @@ func init() {
 		"Access-Control-Allow-Origin: *\r\n" +
 		"\r\n"
 
-	tsHTTPResponseHeader = []byte(tsHTTPResponseHeaderStr)
+	tsHttpResponseHeader = []byte(tsHttpResponseHeaderStr)
 }

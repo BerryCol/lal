@@ -19,7 +19,6 @@ import (
 	"github.com/q191201771/lal/pkg/base"
 
 	"github.com/q191201771/naza/pkg/bele"
-	"github.com/q191201771/naza/pkg/nazalog"
 )
 
 // https://pengrl.com/p/20027
@@ -44,7 +43,7 @@ const (
 )
 
 var (
-	clientVersionMockFromFFMPEG = []byte{9, 0, 124, 2} // emulated Flash client version - 9.0.124.2 on Linux
+	clientVersionMockFromFfmpeg = []byte{9, 0, 124, 2} // emulated Flash client version - 9.0.124.2 on Linux
 	clientVersion               = []byte{0x0C, 0x00, 0x0D, 0x0E}
 	serverVersion               = []byte{0x0D, 0x0E, 0x0A, 0x0D}
 )
@@ -97,8 +96,8 @@ type HandshakeServer struct {
 func (c *HandshakeClientSimple) WriteC0C1(writer io.Writer) error {
 	c.buf = make([]byte, c0c1Len)
 	c.buf[0] = version
-	bele.BEPutUint32(c.buf[1:5], uint32(time.Now().UnixNano()))
-	bele.BEPutUint32(c.buf[5:9], 0) // 4字节模式串保持为0，标识是简单模式
+	bele.BePutUint32(c.buf[1:5], uint32(time.Now().UnixNano()))
+	bele.BePutUint32(c.buf[5:9], 0) // 4字节模式串保持为0，标识是简单模式
 	random1528(c.buf[9:])
 
 	_, err := writer.Write(c.buf)
@@ -126,8 +125,8 @@ func (c *HandshakeClientComplex) WriteC0C1(writer io.Writer) error {
 
 	c.buf[0] = version
 	// mock ffmpeg
-	bele.BEPutUint32(c.buf[1:5], 0)
-	copy(c.buf[5:9], clientVersionMockFromFFMPEG)
+	bele.BePutUint32(c.buf[1:5], 0)
+	copy(c.buf[5:9], clientVersionMockFromFfmpeg)
 	random1528(c.buf[9:])
 
 	offs := int(c.buf[9]) + int(c.buf[10]) + int(c.buf[11]) + int(c.buf[12])
@@ -186,12 +185,12 @@ func (s *HandshakeServer) ReadC0C1(reader io.Reader) (err error) {
 	s1 := s.s0s1s2[1:]
 	s2 := s.s0s1s2[s0s1Len:]
 
-	bele.BEPutUint32(s1, uint32(time.Now().UnixNano()))
+	bele.BePutUint32(s1, uint32(time.Now().UnixNano()))
 	random1528(s1[8:])
 
 	if s.isSimpleMode {
 		// s1
-		bele.BEPutUint32(s1[4:], 0)
+		bele.BePutUint32(s1[4:], 0)
 
 		copy(s2, c0c1[1:])
 	} else {
@@ -230,11 +229,11 @@ func (s *HandshakeServer) ReadC2(reader io.Reader) error {
 // s0s1 serverPartKey clientFullKey
 func parseChallenge(b []byte, peerKey []byte, key []byte) []byte {
 	//if b[0] != version {
-	//	return nil, ErrRTMP
+	//	return nil, ErrRtmp
 	//}
-	ver := bele.BEUint32(b[5:])
+	ver := bele.BeUint32(b[5:])
 	if ver == 0 {
-		nazalog.Debug("handshake simple mode.")
+		Log.Debug("handshake simple mode.")
 		return nil
 	}
 
@@ -243,10 +242,10 @@ func parseChallenge(b []byte, peerKey []byte, key []byte) []byte {
 		offs = findDigest(b[1:], 8, peerKey)
 	}
 	if offs == -1 {
-		nazalog.Warn("get digest offs failed. roll back to try simple handshake.")
+		Log.Warn("get digest offs failed. roll back to try simple handshake.")
 		return nil
 	}
-	nazalog.Debug("handshake complex mode.")
+	Log.Debug("handshake complex mode.")
 
 	// use c0c1 digest to make a new digest
 	digest := makeDigest(b[1+offs:1+offs+keyLen], key)
@@ -296,7 +295,7 @@ func random1528(out []byte) {
 
 func init() {
 	random1528Buf = make([]byte, 1528)
-	hack := []byte(fmt.Sprintf("random buf of rtmp handshake gen by %s", base.LALRTMPHandshakeWaterMark))
+	hack := []byte(fmt.Sprintf("random buf of rtmp handshake gen by %s", base.LalRtmpHandshakeWaterMark))
 	for i := 0; i < 1528; i += len(hack) {
 		copy(random1528Buf[i:], hack)
 	}

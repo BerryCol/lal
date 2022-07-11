@@ -26,28 +26,28 @@ func main() {
 		option.AssertBehavior = nazalog.AssertFatal
 	})
 	defer nazalog.Sync()
+	base.LogoutStartInfo()
 
-	inURL, outFilename, overTCP := parseFlag()
+	inUrl, outFilename, overTcp := parseFlag()
 
-	var fileWriter httpflv.FLVFileWriter
+	var fileWriter httpflv.FlvFileWriter
 	err := fileWriter.Open(outFilename)
 	nazalog.Assert(nil, err)
 	defer fileWriter.Dispose()
-	err = fileWriter.WriteRaw(httpflv.FLVHeader)
+	err = fileWriter.WriteRaw(httpflv.FlvHeader)
 	nazalog.Assert(nil, err)
 
-	remuxer := remux.NewAVPacket2RTMPRemuxer(func(msg base.RTMPMsg) {
-		err = fileWriter.WriteTag(*remux.RTMPMsg2FLVTag(msg))
+	remuxer := remux.NewAvPacket2RtmpRemuxer().WithOnRtmpMsg(func(msg base.RtmpMsg) {
+		err = fileWriter.WriteTag(*remux.RtmpMsg2FlvTag(msg))
 		nazalog.Assert(nil, err)
 	})
 	pullSession := rtsp.NewPullSession(remuxer, func(option *rtsp.PullSessionOption) {
-		option.PullTimeoutMS = 5000
-		option.OverTCP = overTCP != 0
+		option.PullTimeoutMs = 5000
+		option.OverTcp = overTcp != 0
 	})
 
-	err = pullSession.Pull(inURL)
+	err = pullSession.Pull(inUrl)
 	nazalog.Assert(nil, err)
-	defer pullSession.Dispose()
 
 	go func() {
 		for {
@@ -57,13 +57,20 @@ func main() {
 		}
 	}()
 
+	// 临时测试一下主动关闭client session
+	//go func() {
+	//	time.Sleep(5 * time.Second)
+	//	err := pullSession.Dispose()
+	//	nazalog.Debugf("< session Dispose. err=%+v", err)
+	//}()
+
 	err = <-pullSession.WaitChan()
 	nazalog.Infof("< pullSession.Wait(). err=%+v", err)
 }
 
-func parseFlag() (inURL string, outFilename string, overTCP int) {
+func parseFlag() (inUrl string, outFilename string, overTcp int) {
 	i := flag.String("i", "", "specify pull rtsp url")
-	o := flag.String("o", "", "specify ouput flv file")
+	o := flag.String("o", "", "specify output flv file")
 	t := flag.Int("t", 0, "specify interleaved mode(rtp/rtcp over tcp)")
 	flag.Parse()
 	if *i == "" || *o == "" {
@@ -72,7 +79,7 @@ func parseFlag() (inURL string, outFilename string, overTCP int) {
   %s -i rtsp://localhost:5544/live/test110 -o out.flv -t 0
   %s -i rtsp://localhost:5544/live/test110 -o out.flv -t 1
 `, os.Args[0], os.Args[0])
-		base.OSExitAndWaitPressIfWindows(1)
+		base.OsExitAndWaitPressIfWindows(1)
 	}
 	return *i, *o, *t
 }

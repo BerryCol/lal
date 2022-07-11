@@ -11,14 +11,13 @@ package main
 import (
 	"flag"
 	"fmt"
+	"github.com/q191201771/lal/pkg/remux"
 	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/q191201771/lal/pkg/remux"
 
 	"github.com/q191201771/lal/pkg/base"
 
@@ -39,7 +38,7 @@ import (
 //   -n int
 //     	num of pull connection (default 1)
 //   -o string
-//     	specify ouput flv file
+//     	specify output flv file
 // Example:
 //   ./bin/pullrtmp -i rtmp://127.0.0.1:1935/live/test -o out.flv
 //   ./bin/pullrtmp -i rtmp://127.0.0.1:1935/live/test -n 1000
@@ -52,6 +51,7 @@ func main() {
 		option.AssertBehavior = nazalog.AssertFatal
 	})
 	defer nazalog.Sync()
+	base.LogoutStartInfo()
 
 	urlTmpl, fileNameTmpl, num := parseFlag()
 	nazalog.Infof("parse flag succ. urlTmpl=%s, fileNameTmpl=%s, num=%d", urlTmpl, fileNameTmpl, num)
@@ -80,7 +80,7 @@ func main() {
 
 func pull(url string, filename string) {
 	var (
-		w   httpflv.FLVFileWriter
+		w   httpflv.FlvFileWriter
 		err error
 	)
 
@@ -88,27 +88,35 @@ func pull(url string, filename string) {
 		err = w.Open(filename)
 		nazalog.Assert(nil, err)
 		defer w.Dispose()
-		err = w.WriteRaw(httpflv.FLVHeader)
+		err = w.WriteRaw(httpflv.FlvHeader)
 		nazalog.Assert(nil, err)
 	}
 
 	session := rtmp.NewPullSession(func(option *rtmp.PullSessionOption) {
-		option.PullTimeoutMS = 10000
-		option.ReadAVTimeoutMS = 10000
-	})
-
-	err = session.Pull(url, func(msg base.RTMPMsg) {
+		option.PullTimeoutMs = 10000
+		option.ReadAvTimeoutMs = 10000
+		option.ReadBufSize = 0
+	}).WithOnReadRtmpAvMsg(func(msg base.RtmpMsg) {
 		if filename != "" {
-			tag := remux.RTMPMsg2FLVTag(msg)
+			tag := remux.RtmpMsg2FlvTag(msg)
 			err := w.WriteTag(*tag)
 			nazalog.Assert(nil, err)
 		}
 	})
+
+	err = session.Pull(url)
 	if err != nil {
 		nazalog.Errorf("pull failed. err=%+v", err)
 		return
 	}
 	atomic.AddInt32(&aliveSessionCount, 1)
+
+	// 临时测试一下主动关闭client session
+	//go func() {
+	//	time.Sleep(5 * time.Second)
+	//	err := session.Dispose()
+	//	nazalog.Debugf("< session Dispose. err=%+v", err)
+	//}()
 
 	err = <-session.WaitChan()
 	nazalog.Debugf("< session.WaitChan. [%s] err=%+v", session.UniqueKey(), err)
@@ -126,7 +134,7 @@ func collect(urlTmpl string, fileNameTmpl string, num int) (urls []string, filen
 
 func parseFlag() (urlTmpl string, fileNameTmpl string, num int) {
 	i := flag.String("i", "", "specify pull rtmp url")
-	o := flag.String("o", "", "specify ouput flv file")
+	o := flag.String("o", "", "specify output flv file")
 	n := flag.Int("n", 1, "specify num of pull connection")
 	flag.Parse()
 	if *i == "" {
@@ -136,7 +144,7 @@ func parseFlag() (urlTmpl string, fileNameTmpl string, num int) {
   %s -i rtmp://127.0.0.1:1935/live/test -n 1000
   %s -i rtmp://127.0.0.1:1935/live/test_{i} -n 1000
 `, os.Args[0], os.Args[0], os.Args[0])
-		base.OSExitAndWaitPressIfWindows(1)
+		base.OsExitAndWaitPressIfWindows(1)
 	}
 	return *i, *o, *n
 }

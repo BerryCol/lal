@@ -8,6 +8,6 @@
 
 package remux
 
-import "errors"
+// TODO(chef): refactor 此package更名为avop，内部包含remux_xxx2xxx.go, filter_xxx.go, 协议相关(比如rtmp.go)等
 
-var ErrRemux = errors.New("lal.remux: fxxk")
+var _ iRtmp2MpegtsFilterObserver = &Rtmp2MpegtsRemuxer{}

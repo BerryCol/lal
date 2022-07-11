@@ -10,8 +10,11 @@ package httpflv
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"net"
+	"net/http"
+	"sync"
 	"time"
 
 	"github.com/q191201771/lal/pkg/base"
@@ -19,34 +22,30 @@ import (
 	"github.com/q191201771/naza/pkg/nazahttp"
 
 	"github.com/q191201771/naza/pkg/connection"
-	"github.com/q191201771/naza/pkg/nazalog"
 )
 
 type PullSessionOption struct {
 	// 从调用Pull函数，到接收音视频数据的前一步，也即发送完HTTP请求的超时时间
 	// 如果为0，则没有超时时间
-	PullTimeoutMS int
+	PullTimeoutMs int
 
-	ReadTimeoutMS int // 接收数据超时，单位毫秒，如果为0，则不设置超时
+	ReadTimeoutMs int // 接收数据超时，单位毫秒，如果为0，则不设置超时
 }
 
 var defaultPullSessionOption = PullSessionOption{
-	PullTimeoutMS: 10000,
-	ReadTimeoutMS: 0,
+	PullTimeoutMs: 10000,
+	ReadTimeoutMs: 0,
 }
 
 type PullSession struct {
-	uniqueKey string            // const after ctor
-	option    PullSessionOption // const after ctor
+	option PullSessionOption // const after ctor
 
-	conn         connection.Connection
-	prevConnStat connection.Stat
-	staleStat    *connection.Stat
-	stat         base.StatSession
+	conn        connection.Connection
+	sessionStat base.BasicSessionStat
 
-	urlCtx base.URLContext
+	urlCtx base.UrlContext
 
-	waitChan chan error
+	disposeOnce sync.Once
 }
 
 type ModPullSessionOption func(option *PullSessionOption)
@@ -57,221 +56,269 @@ func NewPullSession(modOptions ...ModPullSessionOption) *PullSession {
 		fn(&option)
 	}
 
-	uk := base.GenUKFLVPullSession()
 	s := &PullSession{
-		uniqueKey: uk,
-		option:    option,
-		waitChan:  make(chan error, 1),
+		option:      option,
+		sessionStat: base.NewBasicSessionStat(base.SessionTypeFlvPull, ""),
 	}
-	nazalog.Infof("[%s] lifecycle new httpflv PullSession. session=%p", uk, s)
+	Log.Infof("[%s] lifecycle new httpflv PullSession. session=%p", s.UniqueKey(), s)
 	return s
 }
 
-// @param tag: 底层保证回调上来的Raw数据长度是完整的（但是不会分析Raw内部的编码数据）
-type OnReadFLVTag func(tag Tag)
+// OnReadFlvTag @param tag: 底层保证回调上来的Raw数据长度是完整的（但是不会分析Raw内部的编码数据）
+type OnReadFlvTag func(tag Tag)
 
-// 阻塞直到和对端完成拉流前，握手部分的工作（也即发送完HTTP Request），或者发生错误
+// Pull 阻塞直到和对端完成拉流前，握手部分的工作，或者发生错误
 //
-// @param rawURL 支持如下两种格式。（当然，关键点是对端支持）
+// 注意，握手指的是发送完HTTP Request，不包含接收任何数据，因为有的httpflv服务端，如果流不存在不会发送任何内容，此时我们也应该认为是握手完成了
+//
+// @param rawUrl 支持如下两种格式。（当然，关键点是对端支持）
 //               http://{domain}/{app_name}/{stream_name}.flv
 //               http://{ip}/{domain}/{app_name}/{stream_name}.flv
 //
-// @param onReadFLVTag 读取到 flv tag 数据时回调。回调结束后，PullSession 不会再使用这块 <tag> 数据。
-func (session *PullSession) Pull(rawURL string, onReadFLVTag OnReadFLVTag) error {
-	nazalog.Debugf("[%s] pull. url=%s", session.uniqueKey, rawURL)
+// @param onReadFlvTag 读取到 flv tag 数据时回调。回调结束后，PullSession 不会再使用这块 <tag> 数据。
+//
+func (session *PullSession) Pull(rawUrl string, onReadFlvTag OnReadFlvTag) error {
+	Log.Debugf("[%s] pull. url=%s", session.UniqueKey(), rawUrl)
 
 	var (
 		ctx    context.Context
 		cancel context.CancelFunc
 	)
-	if session.option.PullTimeoutMS == 0 {
+	if session.option.PullTimeoutMs == 0 {
 		ctx, cancel = context.WithCancel(context.Background())
 	} else {
-		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(session.option.PullTimeoutMS)*time.Millisecond)
+		ctx, cancel = context.WithTimeout(context.Background(), time.Duration(session.option.PullTimeoutMs)*time.Millisecond)
 	}
 	defer cancel()
-	return session.pullContext(ctx, rawURL, onReadFLVTag)
+	return session.pullContext(ctx, rawUrl, onReadFlvTag)
 }
 
-// 文档请参考： interface IClientSessionLifecycle
+// ---------------------------------------------------------------------------------------------------------------------
+// IClientSessionLifecycle interface
+// ---------------------------------------------------------------------------------------------------------------------
+
+// Dispose 文档请参考： IClientSessionLifecycle interface
+//
 func (session *PullSession) Dispose() error {
-	nazalog.Infof("[%s] lifecycle dispose httpflv PullSession.", session.uniqueKey)
-	if session.conn == nil {
-		return base.ErrSessionNotStarted
-	}
-	return session.conn.Close()
+	return session.dispose(nil)
 }
 
-// 文档请参考： interface IClientSessionLifecycle
+// WaitChan 文档请参考： IClientSessionLifecycle interface
+//
 func (session *PullSession) WaitChan() <-chan error {
-	return session.waitChan
+	return session.conn.Done()
 }
 
-// 文档请参考： interface ISessionURLContext
-func (session *PullSession) URL() string {
-	return session.urlCtx.URL
+// ---------------------------------------------------------------------------------------------------------------------
+
+// Url 文档请参考： interface ISessionUrlContext
+func (session *PullSession) Url() string {
+	return session.urlCtx.Url
 }
 
-// 文档请参考： interface ISessionURLContext
+// AppName 文档请参考： interface ISessionUrlContext
 func (session *PullSession) AppName() string {
 	return session.urlCtx.PathWithoutLastItem
 }
 
-// 文档请参考： interface ISessionURLContext
+// StreamName 文档请参考： interface ISessionUrlContext
 func (session *PullSession) StreamName() string {
 	return session.urlCtx.LastItemOfPath
 }
 
-// 文档请参考： interface ISessionURLContext
+// RawQuery 文档请参考： interface ISessionUrlContext
 func (session *PullSession) RawQuery() string {
 	return session.urlCtx.RawQuery
 }
 
-// 文档请参考： interface IObject
+// UniqueKey 文档请参考： interface IObject
 func (session *PullSession) UniqueKey() string {
-	return session.uniqueKey
+	return session.sessionStat.UniqueKey()
 }
 
-// 文档请参考： interface ISessionStat
+// ----- ISessionStat --------------------------------------------------------------------------------------------------
+
+// UpdateStat 文档请参考： interface ISessionStat
 func (session *PullSession) UpdateStat(intervalSec uint32) {
-	currStat := session.conn.GetStat()
-	rDiff := currStat.ReadBytesSum - session.prevConnStat.ReadBytesSum
-	session.stat.ReadBitrate = int(rDiff * 8 / 1024 / uint64(intervalSec))
-	wDiff := currStat.WroteBytesSum - session.prevConnStat.WroteBytesSum
-	session.stat.WriteBitrate = int(wDiff * 8 / 1024 / uint64(intervalSec))
-	session.stat.Bitrate = session.stat.ReadBitrate
-	session.prevConnStat = currStat
+	session.sessionStat.UpdateStatWitchConn(session.conn, intervalSec)
 }
 
-// 文档请参考： interface ISessionStat
+// GetStat 文档请参考： interface ISessionStat
 func (session *PullSession) GetStat() base.StatSession {
-	connStat := session.conn.GetStat()
-	session.stat.ReadBytesSum = connStat.ReadBytesSum
-	session.stat.WroteBytesSum = connStat.WroteBytesSum
-	return session.stat
+	return session.sessionStat.GetStatWithConn(session.conn)
 }
 
-// 文档请参考： interface ISessionStat
+// IsAlive 文档请参考： interface ISessionStat
 func (session *PullSession) IsAlive() (readAlive, writeAlive bool) {
-	currStat := session.conn.GetStat()
-	if session.staleStat == nil {
-		session.staleStat = new(connection.Stat)
-		*session.staleStat = currStat
-		return true, true
-	}
-
-	readAlive = !(currStat.ReadBytesSum-session.staleStat.ReadBytesSum == 0)
-	writeAlive = !(currStat.WroteBytesSum-session.staleStat.WroteBytesSum == 0)
-	*session.staleStat = currStat
-	return
+	return session.sessionStat.IsAliveWitchConn(session.conn)
 }
 
-func (session *PullSession) pullContext(ctx context.Context, rawURL string, onReadFLVTag OnReadFLVTag) error {
+// ---------------------------------------------------------------------------------------------------------------------
+
+func (session *PullSession) pullContext(ctx context.Context, rawUrl string, onReadFlvTag OnReadFlvTag) error {
 	errChan := make(chan error, 1)
+	url := rawUrl
 
+	// 异步握手
 	go func() {
-		if err := session.connect(rawURL); err != nil {
-			errChan <- err
-			return
-		}
-		if err := session.writeHTTPRequest(); err != nil {
-			errChan <- err
-			return
-		}
+		for {
+			if err := session.connect(url); err != nil {
+				errChan <- err
+				return
+			}
+			if err := session.writeHttpRequest(); err != nil {
+				errChan <- err
+				return
+			}
 
-		errChan <- nil
+			statusCode, headers, err := session.readHttpRespHeader()
+			if err != nil {
+				errChan <- err
+				return
+			}
+
+			// 处理跳转
+			if statusCode == "301" || statusCode == "302" {
+				url = headers.Get("Location")
+				if url == "" {
+					Log.Warnf("[%s] redirect but Location not found. headers=%+v", session.UniqueKey(), headers)
+					errChan <- nil
+					return
+				}
+
+				_ = session.conn.Close()
+				Log.Debugf("[%s] redirect to %s", session.UniqueKey(), url)
+				continue
+			}
+
+			errChan <- nil
+			return
+		}
 	}()
 
+	// 等待握手结果，或者超时通知
 	select {
 	case <-ctx.Done():
+		// 注意，如果超时，可能连接已经建立了，要dispose避免泄漏
+		_ = session.dispose(nil)
 		return ctx.Err()
 	case err := <-errChan:
+		// 握手消息，不为nil则握手失败
 		if err != nil {
+			_ = session.dispose(err)
 			return err
 		}
 	}
 
-	go session.runReadLoop(onReadFLVTag)
+	// 握手成功，开启收数据协程
+	go session.runReadLoop(onReadFlvTag)
 	return nil
 }
 
-func (session *PullSession) connect(rawURL string) (err error) {
-	session.urlCtx, err = base.ParseHTTPFLVURL(rawURL, false)
+func (session *PullSession) connect(rawUrl string) (err error) {
+	// TODO(chef): refactor 可以考虑抽象出一个http client，负责http拉流的建连、https、302等功能
+
+	session.urlCtx, err = base.ParseHttpflvUrl(rawUrl)
 	if err != nil {
 		return
 	}
 
-	nazalog.Debugf("[%s] > tcp connect.", session.uniqueKey)
+	session.sessionStat.SetRemoteAddr(session.urlCtx.HostWithPort)
 
-	// # 建立连接
-	conn, err := net.Dial("tcp", session.urlCtx.HostWithPort)
+	Log.Debugf("[%s] > tcp connect. %s", session.UniqueKey(), session.urlCtx.HostWithPort)
+
+	var conn net.Conn
+	if session.urlCtx.Scheme == "https" {
+		conf := &tls.Config{
+			InsecureSkipVerify: true,
+		}
+		conn, err = tls.Dial("tcp", session.urlCtx.HostWithPort, conf)
+	} else {
+		conn, err = net.Dial("tcp", session.urlCtx.HostWithPort)
+	}
+
 	if err != nil {
 		return err
 	}
+
+	Log.Debugf("[%s] tcp connect succ. remote=%s", session.UniqueKey(), conn.RemoteAddr().String())
+
 	session.conn = connection.New(conn, func(option *connection.Option) {
 		option.ReadBufSize = readBufSize
-		option.WriteTimeoutMS = session.option.ReadTimeoutMS // TODO chef: 为什么是 Read 赋值给 Write
-		option.ReadTimeoutMS = session.option.ReadTimeoutMS
+		option.WriteTimeoutMs = session.option.ReadTimeoutMs // TODO chef: 为什么是 Read 赋值给 Write
+		option.ReadTimeoutMs = session.option.ReadTimeoutMs
 	})
 	return nil
 }
 
-func (session *PullSession) writeHTTPRequest() error {
+func (session *PullSession) writeHttpRequest() error {
 	// # 发送 http GET 请求
-	nazalog.Debugf("[%s] > W http request. GET %s", session.uniqueKey, session.urlCtx.PathWithRawQuery)
+	Log.Debugf("[%s] > W http request. GET %s", session.UniqueKey(), session.urlCtx.PathWithRawQuery)
 	req := fmt.Sprintf("GET %s HTTP/1.0\r\nUser-Agent: %s\r\nAccept: */*\r\nRange: byte=0-\r\nConnection: close\r\nHost: %s\r\nIcy-MetaData: 1\r\n\r\n",
-		session.urlCtx.PathWithRawQuery, base.LALHTTPFLVPullSessionUA, session.urlCtx.StdHost)
+		session.urlCtx.PathWithRawQuery, base.LalHttpflvPullSessionUa, session.urlCtx.StdHost)
 	_, err := session.conn.Write([]byte(req))
 	return err
 }
 
-func (session *PullSession) readHTTPRespHeader() (statusLine string, headers map[string]string, err error) {
-	// TODO chef: timeout
-	if statusLine, headers, err = nazahttp.ReadHTTPHeader(session.conn); err != nil {
+func (session *PullSession) readHttpRespHeader() (statusCode string, headers http.Header, err error) {
+	var statusLine string
+	if statusLine, headers, err = nazahttp.ReadHttpHeader(session.conn); err != nil {
 		return
 	}
-	_, code, _, err := nazahttp.ParseHTTPStatusLine(statusLine)
+	_, statusCode, _, err = nazahttp.ParseHttpStatusLine(statusLine)
 	if err != nil {
 		return
 	}
 
-	nazalog.Debugf("[%s] < R http response header. code=%s", session.uniqueKey, code)
+	Log.Debugf("[%s] < R http response header. statusLine=%s", session.UniqueKey(), statusLine)
 	return
 }
 
-func (session *PullSession) readFLVHeader() ([]byte, error) {
+func (session *PullSession) readFlvHeader() ([]byte, error) {
 	flvHeader := make([]byte, flvHeaderSize)
 	_, err := session.conn.ReadAtLeast(flvHeader, flvHeaderSize)
 	if err != nil {
 		return flvHeader, err
 	}
-	nazalog.Debugf("[%s] < R http flv header.", session.uniqueKey)
+	Log.Debugf("[%s] < R http flv header.", session.UniqueKey())
 
 	// TODO chef: check flv header's value
 	return flvHeader, nil
 }
 
 func (session *PullSession) readTag() (Tag, error) {
-	return readTag(session.conn)
+	return ReadTag(session.conn)
 }
 
-func (session *PullSession) runReadLoop(onReadFLVTag OnReadFLVTag) {
-	if _, _, err := session.readHTTPRespHeader(); err != nil {
-		session.waitChan <- err
-		return
-	}
+func (session *PullSession) runReadLoop(onReadFlvTag OnReadFlvTag) {
+	var err error
+	defer func() {
+		_ = session.dispose(err)
+	}()
 
-	if _, err := session.readFLVHeader(); err != nil {
-		session.waitChan <- err
+	if _, err = session.readFlvHeader(); err != nil {
 		return
 	}
 
 	for {
-		tag, err := session.readTag()
+		var tag Tag
+		tag, err = session.readTag()
 		if err != nil {
-			session.waitChan <- err
 			return
 		}
-		onReadFLVTag(tag)
+		onReadFlvTag(tag)
 	}
+}
+
+func (session *PullSession) dispose(err error) error {
+	var retErr error
+	session.disposeOnce.Do(func() {
+		Log.Infof("[%s] lifecycle dispose httpflv PullSession. err=%+v", session.UniqueKey(), err)
+		if session.conn == nil {
+			retErr = base.ErrSessionNotStarted
+			return
+		}
+		retErr = session.conn.Close()
+	})
+	return retErr
 }

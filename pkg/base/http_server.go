@@ -10,7 +10,6 @@ package base
 
 import (
 	"crypto/tls"
-	"errors"
 	"net"
 	"net/http"
 	"reflect"
@@ -22,25 +21,20 @@ import (
 // - 考虑移入naza中
 // - 考虑增加一个pattern全部未命中的mux回调
 
-var (
-	ErrAddrEmpty             = errors.New("lal.base: http server addr empty")
-	ErrMultiRegistForPattern = errors.New("lal.base: http server multiple registrations for pattern")
-)
-
 const (
-	NetworkTCP = "tcp"
+	NetworkTcp = "tcp"
 )
 
 type LocalAddrCtx struct {
-	IsHTTPS  bool
+	IsHttps  bool
 	Addr     string
 	CertFile string
 	KeyFile  string
 
-	Network string // 默认为NetworkTCP
+	Network string
 }
 
-type HTTPServerManager struct {
+type HttpServerManager struct {
 	addr2ServerCtx map[string]*ServerCtx
 }
 
@@ -52,16 +46,30 @@ type ServerCtx struct {
 	pattern2Handler map[string]Handler
 }
 
-func NewHTTPServerManager() *HTTPServerManager {
-	return &HTTPServerManager{
+func NewHttpServerManager() *HttpServerManager {
+	return &HttpServerManager{
 		addr2ServerCtx: make(map[string]*ServerCtx),
 	}
 }
 
 type Handler func(http.ResponseWriter, *http.Request)
 
+// AddListen
+//
+// @param addrCtx IsHttps  是否为https
+//                         注意，如果要为相同的路由同时绑定http和https，那么应该调用该函数两次，分别将该参数设置为true和false
+//                Addr     监听地址，内部会为其建立监听
+//                         http和https不能够使用相同的地址
+//                         注意，多次调用，允许使用相同的地址绑定不同的`pattern`
+//                CertFile
+//                KeyFile
+//                Network  如果为空默认为NetworkTcp="tcp"
+//
 // @param pattern 必须以`/`开始，并以`/`结束
-func (s *HTTPServerManager) AddListen(addrCtx LocalAddrCtx, pattern string, handler Handler) error {
+//                注意，如果是`/`，则在其他所有pattern都匹配失败后，做为兜底匹配成功
+//                相同的pattern不能绑定不同的`handler`回调函数（显然，我们无法为相同的监听地址，相同的路径绑定多个回调函数）
+//
+func (s *HttpServerManager) AddListen(addrCtx LocalAddrCtx, pattern string, handler Handler) error {
 	var (
 		ctx *ServerCtx
 		mux *http.ServeMux
@@ -72,6 +80,7 @@ func (s *HTTPServerManager) AddListen(addrCtx LocalAddrCtx, pattern string, hand
 		return ErrAddrEmpty
 	}
 
+	// 监听地址是否已经创建过
 	ctx, ok = s.addr2ServerCtx[addrCtx.Addr]
 	if !ok {
 		l, err := listen(addrCtx)
@@ -92,13 +101,13 @@ func (s *HTTPServerManager) AddListen(addrCtx LocalAddrCtx, pattern string, hand
 	}
 
 	// 路径相同，比较回调函数是否相同
-	// 如果回调函数也相同，意味着重复绑定，这种情况是允许的
+	// 如果回调函数也相同，意味着重复绑定，这种情况是允许的，忽略掉就行了
 	// 如果回调函数不同，返回错误
 	if prevHandler, ok := ctx.pattern2Handler[pattern]; ok {
 		if reflect.ValueOf(prevHandler).Pointer() == reflect.ValueOf(handler).Pointer() {
 			return nil
 		} else {
-			return ErrMultiRegistForPattern
+			return ErrMultiRegisterForPattern
 		}
 	}
 	ctx.pattern2Handler[pattern] = handler
@@ -107,7 +116,7 @@ func (s *HTTPServerManager) AddListen(addrCtx LocalAddrCtx, pattern string, hand
 	return nil
 }
 
-func (s *HTTPServerManager) RunLoop() error {
+func (s *HttpServerManager) RunLoop() error {
 	errChan := make(chan error, len(s.addr2ServerCtx))
 
 	for _, v := range s.addr2ServerCtx {
@@ -122,7 +131,7 @@ func (s *HTTPServerManager) RunLoop() error {
 	return <-errChan
 }
 
-func (s *HTTPServerManager) Dispose() error {
+func (s *HttpServerManager) Dispose() error {
 	var es []error
 	for _, v := range s.addr2ServerCtx {
 		err := v.httpServer.Close()
@@ -131,12 +140,16 @@ func (s *HTTPServerManager) Dispose() error {
 	return nazaerrors.CombineErrors(es...)
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+
+// 为传入的`Addr`地址创建http或https监听
+//
 func listen(ctx LocalAddrCtx) (net.Listener, error) {
 	if ctx.Network == "" {
-		ctx.Network = NetworkTCP
+		ctx.Network = NetworkTcp
 	}
 
-	if !ctx.IsHTTPS {
+	if !ctx.IsHttps {
 		return net.Listen(ctx.Network, ctx.Addr)
 	}
 

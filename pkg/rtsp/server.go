@@ -10,49 +10,65 @@ package rtsp
 
 import (
 	"net"
-
-	"github.com/q191201771/naza/pkg/nazalog"
 )
 
-type ServerObserver interface {
-	// @brief 使得上层有能力管理未进化到Pub、Sub阶段的Session
-	OnNewRTSPSessionConnect(session *ServerCommandSession)
+type IServerObserver interface {
+	// OnNewRtspSessionConnect @brief 使得上层有能力管理未进化到Pub、Sub阶段的Session
+	OnNewRtspSessionConnect(session *ServerCommandSession)
 
-	// @brief 注意，对于已经进化到了Pub、Sub阶段的Session，该回调依然会被调用
-	OnDelRTSPSession(session *ServerCommandSession)
+	// OnDelRtspSession @brief 注意，对于已经进化到了Pub、Sub阶段的Session，该回调依然会被调用
+	OnDelRtspSession(session *ServerCommandSession)
 
 	///////////////////////////////////////////////////////////////////////////
 
+	// OnNewRtspPubSession
+	//
 	// @brief  Announce阶段回调
-	// @return 如果返回false，则表示上层要强制关闭这个推流请求
-	OnNewRTSPPubSession(session *PubSession) bool
+	// @return 如果返回非nil，则表示上层要强制关闭这个推流请求
+	//
+	OnNewRtspPubSession(session *PubSession) error
 
-	OnDelRTSPPubSession(session *PubSession)
+	OnDelRtspPubSession(session *PubSession)
 
 	///////////////////////////////////////////////////////////////////////////
 
+	// OnNewRtspSubSessionDescribe
+	//
 	// @return 如果返回false，则表示上层要强制关闭这个拉流请求
 	// @return sdp
-	OnNewRTSPSubSessionDescribe(session *SubSession) (ok bool, sdp []byte)
+	//
+	OnNewRtspSubSessionDescribe(session *SubSession) (ok bool, sdp []byte)
 
-	// @brief Describe阶段回调
-	// @return ok  如果返回false，则表示上层要强制关闭这个拉流请求
-	OnNewRTSPSubSessionPlay(session *SubSession) bool
+	// OnNewRtspSubSessionPlay
+	//
+	// @brief Play阶段回调
+	// @return ok  如果返回非nil，则表示上层要强制关闭这个拉流请求
+	//
+	OnNewRtspSubSessionPlay(session *SubSession) error
 
-	OnDelRTSPSubSession(session *SubSession)
+	OnDelRtspSubSession(session *SubSession)
+}
+
+type ServerAuthConfig struct {
+	AuthEnable bool   `json:"auth_enable"`
+	AuthMethod int    `json:"auth_method"`
+	UserName   string `json:"username"`
+	PassWord   string `json:"password"`
 }
 
 type Server struct {
 	addr     string
-	observer ServerObserver
+	observer IServerObserver
 
-	ln net.Listener
+	ln   net.Listener
+	auth ServerAuthConfig
 }
 
-func NewServer(addr string, observer ServerObserver) *Server {
+func NewServer(addr string, observer IServerObserver, auth ServerAuthConfig) *Server {
 	return &Server{
 		addr:     addr,
 		observer: observer,
+		auth:     auth,
 	}
 }
 
@@ -61,7 +77,7 @@ func (s *Server) Listen() (err error) {
 	if err != nil {
 		return
 	}
-	nazalog.Infof("start rtsp server listen. addr=%s", s.addr)
+	Log.Infof("start rtsp server listen. addr=%s", s.addr)
 	return
 }
 
@@ -71,7 +87,7 @@ func (s *Server) RunLoop() error {
 		if err != nil {
 			return err
 		}
-		go s.handleTCPConnect(conn)
+		go s.handleTcpConnect(conn)
 	}
 }
 
@@ -80,46 +96,47 @@ func (s *Server) Dispose() {
 		return
 	}
 	if err := s.ln.Close(); err != nil {
-		nazalog.Error(err)
+		Log.Error(err)
 	}
 }
 
-// ServerCommandSessionObserver
-func (s *Server) OnNewRTSPPubSession(session *PubSession) bool {
-	return s.observer.OnNewRTSPPubSession(session)
+// ----- ServerCommandSessionObserver ----------------------------------------------------------------------------------
+
+func (s *Server) OnNewRtspPubSession(session *PubSession) error {
+	return s.observer.OnNewRtspPubSession(session)
 }
 
-// ServerCommandSessionObserver
-func (s *Server) OnNewRTSPSubSessionDescribe(session *SubSession) (ok bool, sdp []byte) {
-	return s.observer.OnNewRTSPSubSessionDescribe(session)
+func (s *Server) OnNewRtspSubSessionDescribe(session *SubSession) (ok bool, sdp []byte) {
+	return s.observer.OnNewRtspSubSessionDescribe(session)
 }
 
-// ServerCommandSessionObserver
-func (s *Server) OnNewRTSPSubSessionPlay(session *SubSession) bool {
-	return s.observer.OnNewRTSPSubSessionPlay(session)
+func (s *Server) OnNewRtspSubSessionPlay(session *SubSession) error {
+	return s.observer.OnNewRtspSubSessionPlay(session)
 }
 
-// ServerCommandSessionObserver
-func (s *Server) OnDelRTSPPubSession(session *PubSession) {
-	s.observer.OnDelRTSPPubSession(session)
+func (s *Server) OnDelRtspPubSession(session *PubSession) {
+	s.observer.OnDelRtspPubSession(session)
 }
 
-// ServerCommandSessionObserver
-func (s *Server) OnDelRTSPSubSession(session *SubSession) {
-	s.observer.OnDelRTSPSubSession(session)
+func (s *Server) OnDelRtspSubSession(session *SubSession) {
+	s.observer.OnDelRtspSubSession(session)
 }
 
-func (s *Server) handleTCPConnect(conn net.Conn) {
-	session := NewServerCommandSession(s, conn)
-	s.observer.OnNewRTSPSessionConnect(session)
+// ---------------------------------------------------------------------------------------------------------------------
+
+func (s *Server) handleTcpConnect(conn net.Conn) {
+	session := NewServerCommandSession(s, conn, s.auth)
+	s.observer.OnNewRtspSessionConnect(session)
 
 	err := session.RunLoop()
-	nazalog.Info(err)
+	Log.Info(err)
 
 	if session.pubSession != nil {
-		s.observer.OnDelRTSPPubSession(session.pubSession)
+		s.observer.OnDelRtspPubSession(session.pubSession)
+		_ = session.pubSession.Dispose()
 	} else if session.subSession != nil {
-		s.observer.OnDelRTSPSubSession(session.subSession)
+		s.observer.OnDelRtspSubSession(session.subSession)
+		_ = session.subSession.Dispose()
 	}
-	s.observer.OnDelRTSPSession(session)
+	s.observer.OnDelRtspSession(session)
 }

@@ -8,13 +8,9 @@
 
 package mpegts
 
-import "errors"
-
 // MPEG: Moving Picture Experts Group
 
-var ErrMPEGTS = errors.New("lal.mpegts: fxxk")
-
-// 每个TS文件都以固定的PAT，PMT开始
+// FixedFragmentHeader 每个TS文件都以固定的PAT，PMT开始
 var FixedFragmentHeader = []byte{
 	/* TS */
 	0x47, 0x40, 0x00, 0x10, 0x00,
@@ -74,8 +70,8 @@ var FixedFragmentHeader = []byte{
 	0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
 }
 
-// 每个TS文件都以固定的PAT，PMT开始
-var FixedFragmentHeaderHEVC = []byte{
+// FixedFragmentHeaderHevc 每个TS文件都以固定的PAT，PMT开始
+var FixedFragmentHeaderHevc = []byte{
 	/* TS */
 	0x47, 0x40, 0x00, 0x10, 0x00,
 	/* PSI */
@@ -140,11 +136,11 @@ var FixedFragmentHeaderHEVC = []byte{
 const (
 	syncByte uint8 = 0x47
 
-	PidPAT   uint16 = 0
+	PidPat   uint16 = 0
 	PidVideo uint16 = 0x100
 	PidAudio uint16 = 0x101
 
-	// ------------------------------------------
+	// AdaptationFieldControlReserved ------------------------------------------
 	// <iso13818-1.pdf> <Table 2-5> <page 38/174>
 	// ------------------------------------------
 	AdaptationFieldControlReserved uint8 = 0 // Reserved for future use by ISO/IEC
@@ -161,26 +157,26 @@ const (
 	// 0x1B AVC  (video stream as defined in ITU-T Rec. H.264 | ISO/IEC 14496-10 Video)
 	// 0x24 HEVC (HEVC video stream as defined in Rec. ITU-T H.265 | ISO/IEC 23008-2  MPEG-H Part 2)
 	// -----------------------------------------------------------------------------
-	streamTypeAAC  uint8 = 0x0F
-	streamTypeAVC  uint8 = 0x1B
-	streamTypeHEVC uint8 = 0x24
+	streamTypeAac  uint8 = 0x0F
+	streamTypeAvc  uint8 = 0x1B
+	streamTypeHevc uint8 = 0x24
 )
 
 // PES
 const (
-	// -----------------------------------------------------------------
+	// StreamIdAudio -----------------------------------------------------------------
 	// <iso13818-1.pdf> <Table 2-18-Stream_id assignments> <page 52/174>
 	// -----------------------------------------------------------------
-	StreamIDAudio uint8 = 192 // 110x xxxx 0xC0
-	StreamIDVideo uint8 = 224 // 1110 xxxx
+	StreamIdAudio uint8 = 192 // 110x xxxx 0xC0
+	StreamIdVideo uint8 = 224 // 1110 xxxx
 
-	// ------------------------------
+	// PtsDtsFlags0 ------------------------------
 	// <iso13818-1.pdf> <page 53/174>
 	// ------------------------------
-	PTSDTSFlags0 uint8 = 0 // no PTS no DTS
-	PTSDTSFlags1 uint8 = 1 // forbidden
-	PTSDTSFlags2 uint8 = 2 // only PTS
-	PTSDTSFlags3 uint8 = 3 // both PTS and DTS
+	PtsDtsFlags0 uint8 = 0 // no PTS no DTS
+	PtsDtsFlags1 uint8 = 1 // forbidden
+	PtsDtsFlags2 uint8 = 2 // only PTS
+	PtsDtsFlags3 uint8 = 3 // both PTS and DTS
 )
 
 const (

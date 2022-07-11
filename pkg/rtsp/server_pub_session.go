@@ -14,45 +14,40 @@ import (
 
 	"github.com/q191201771/lal/pkg/base"
 	"github.com/q191201771/lal/pkg/sdp"
-
-	"github.com/q191201771/naza/pkg/nazalog"
 )
 
-type PubSessionObserver interface {
-	BaseInSessionObserver
+type IPubSessionObserver interface {
+	IBaseInSessionObserver
 }
 
 type PubSession struct {
-	uniqueKey     string
-	urlCtx        base.URLContext
+	urlCtx        base.UrlContext
 	cmdSession    *ServerCommandSession
 	baseInSession *BaseInSession
 
-	observer PubSessionObserver
+	observer IPubSessionObserver
 }
 
-func NewPubSession(urlCtx base.URLContext, cmdSession *ServerCommandSession) *PubSession {
-	uk := base.GenUKRTSPPubSession()
+func NewPubSession(urlCtx base.UrlContext, cmdSession *ServerCommandSession) *PubSession {
 	s := &PubSession{
-		uniqueKey:  uk,
 		urlCtx:     urlCtx,
 		cmdSession: cmdSession,
 	}
-	baseInSession := NewBaseInSession(uk, s)
+	baseInSession := NewBaseInSession(base.SessionTypeRtspPub, s)
 	s.baseInSession = baseInSession
-	nazalog.Infof("[%s] lifecycle new rtsp PubSession. session=%p, streamName=%s", uk, s, urlCtx.LastItemOfPath)
+	Log.Infof("[%s] lifecycle new rtsp PubSession. session=%p, streamName=%s", s, urlCtx.LastItemOfPath)
 	return s
 }
 
-func (session *PubSession) InitWithSDP(rawSDP []byte, sdpLogicCtx sdp.LogicContext) {
-	session.baseInSession.InitWithSDP(rawSDP, sdpLogicCtx)
+func (session *PubSession) InitWithSdp(sdpCtx sdp.LogicContext) {
+	session.baseInSession.InitWithSdp(sdpCtx)
 }
 
-func (session *PubSession) SetObserver(observer PubSessionObserver) {
+func (session *PubSession) SetObserver(observer IPubSessionObserver) {
 	session.baseInSession.SetObserver(observer)
 }
 
-func (session *PubSession) SetupWithConn(uri string, rtpConn, rtcpConn *nazanet.UDPConnection) error {
+func (session *PubSession) SetupWithConn(uri string, rtpConn, rtcpConn *nazanet.UdpConnection) error {
 	return session.baseInSession.SetupWithConn(uri, rtpConn, rtcpConn)
 }
 
@@ -61,22 +56,22 @@ func (session *PubSession) SetupWithChannel(uri string, rtpChannel, rtcpChannel 
 }
 
 func (session *PubSession) Dispose() error {
-	nazalog.Infof("[%s] lifecycle dispose rtsp PubSession. session=%p", session.uniqueKey, session)
+	Log.Infof("[%s] lifecycle dispose rtsp PubSession. session=%p", session.UniqueKey(), session)
 	e1 := session.cmdSession.Dispose()
 	e2 := session.baseInSession.Dispose()
 	return nazaerrors.CombineErrors(e1, e2)
 }
 
-func (session *PubSession) GetSDP() ([]byte, sdp.LogicContext) {
-	return session.baseInSession.GetSDP()
+func (session *PubSession) GetSdp() sdp.LogicContext {
+	return session.baseInSession.GetSdp()
 }
 
 func (session *PubSession) HandleInterleavedPacket(b []byte, channel int) {
 	session.baseInSession.HandleInterleavedPacket(b, channel)
 }
 
-func (session *PubSession) URL() string {
-	return session.urlCtx.URL
+func (session *PubSession) Url() string {
+	return session.urlCtx.Url
 }
 
 func (session *PubSession) AppName() string {
@@ -92,8 +87,10 @@ func (session *PubSession) RawQuery() string {
 }
 
 func (session *PubSession) UniqueKey() string {
-	return session.uniqueKey
+	return session.baseInSession.UniqueKey()
 }
+
+// ----- ISessionStat --------------------------------------------------------------------------------------------------
 
 func (session *PubSession) GetStat() base.StatSession {
 	stat := session.baseInSession.GetStat()
@@ -109,7 +106,9 @@ func (session *PubSession) IsAlive() (readAlive, writeAlive bool) {
 	return session.baseInSession.IsAlive()
 }
 
-// IInterleavedPacketWriter, callback by BaseInSession
+// ---------------------------------------------------------------------------------------------------------------------
+
+// WriteInterleavedPacket IInterleavedPacketWriter, callback by BaseInSession
 func (session *PubSession) WriteInterleavedPacket(packet []byte, channel int) error {
 	return session.cmdSession.WriteInterleavedPacket(packet, channel)
 }

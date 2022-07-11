@@ -12,7 +12,7 @@ import (
 	"github.com/q191201771/naza/pkg/nazabits"
 )
 
-// ---------------------------------------------------------------------------------------------------
+// Pat ---------------------------------------------------------------------------------------------------
 // Program association section
 // <iso13818-1.pdf> <2.4.4.3> <page 61/174>
 // table_id                 [8b] *
@@ -33,7 +33,7 @@ import (
 // --------------
 // CRC_32                   [32b] ****
 // ---------------------------------------------------------------------------------------------------
-type PAT struct {
+type Pat struct {
 	tid   uint8
 	ssi   uint8
 	sl    uint16
@@ -42,16 +42,16 @@ type PAT struct {
 	cni   uint8
 	sn    uint8
 	lsn   uint8
-	ppes  []PATProgramElement
+	ppes  []PatProgramElement
 	crc32 uint32
 }
 
-type PATProgramElement struct {
+type PatProgramElement struct {
 	pn    uint16
 	pmpid uint16
 }
 
-func ParsePAT(b []byte) (pat PAT) {
+func ParsePat(b []byte) (pat Pat) {
 	// TODO chef: 检查长度
 	br := nazabits.NewBitReader(b)
 	pat.tid, _ = br.ReadBits8(8)
@@ -68,7 +68,7 @@ func ParsePAT(b []byte) (pat PAT) {
 	length := pat.sl - 9
 
 	for i := uint16(0); i < length; i += 4 {
-		var ppe PATProgramElement
+		var ppe PatProgramElement
 		ppe.pn, _ = br.ReadBits16(16)
 		_, _ = br.ReadBits8(3)
 		// TODO chef if pn == 0
@@ -79,7 +79,7 @@ func ParsePAT(b []byte) (pat PAT) {
 	return
 }
 
-func (pat *PAT) SearchPID(pid uint16) bool {
+func (pat *Pat) SearchPid(pid uint16) bool {
 	for _, ppe := range pat.ppes {
 		if pid == ppe.pmpid {
 			return true

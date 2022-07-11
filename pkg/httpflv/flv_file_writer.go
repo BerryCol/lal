@@ -8,51 +8,55 @@
 
 package httpflv
 
-import "os"
+import (
+	"os"
+
+	"github.com/q191201771/lal/pkg/base"
+)
 
 // TODO chef: 结构体重命名为FileWriter，文件名重命名为file_writer.go。所有写流文件的（flv,hls,ts）统一重构
 
-type FLVFileWriter struct {
+type FlvFileWriter struct {
 	fp *os.File
 }
 
-func (ffw *FLVFileWriter) Open(filename string) (err error) {
+func (ffw *FlvFileWriter) Open(filename string) (err error) {
 	ffw.fp, err = os.Create(filename)
 	return
 }
 
-func (ffw *FLVFileWriter) WriteRaw(b []byte) (err error) {
+func (ffw *FlvFileWriter) WriteRaw(b []byte) (err error) {
 	if ffw.fp == nil {
-		return ErrHTTPFLV
+		return base.ErrFileNotExist
 	}
 	_, err = ffw.fp.Write(b)
 	return
 }
 
-func (ffw *FLVFileWriter) WriteFLVHeader() (err error) {
+func (ffw *FlvFileWriter) WriteFlvHeader() (err error) {
 	if ffw.fp == nil {
-		return ErrHTTPFLV
+		return base.ErrFileNotExist
 	}
-	_, err = ffw.fp.Write(FLVHeader)
+	_, err = ffw.fp.Write(FlvHeader)
 	return
 }
 
-func (ffw *FLVFileWriter) WriteTag(tag Tag) (err error) {
+func (ffw *FlvFileWriter) WriteTag(tag Tag) (err error) {
 	if ffw.fp == nil {
-		return ErrHTTPFLV
+		return base.ErrFileNotExist
 	}
 	_, err = ffw.fp.Write(tag.Raw)
 	return
 }
 
-func (ffw *FLVFileWriter) Dispose() error {
+func (ffw *FlvFileWriter) Dispose() error {
 	if ffw.fp == nil {
-		return ErrHTTPFLV
+		return base.ErrFileNotExist
 	}
 	return ffw.fp.Close()
 }
 
-func (ffw *FLVFileWriter) Name() string {
+func (ffw *FlvFileWriter) Name() string {
 	if ffw.fp == nil {
 		return ""
 	}

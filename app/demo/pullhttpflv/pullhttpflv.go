@@ -21,13 +21,14 @@ import (
 //
 // TODO
 // - 存储成flv文件
-// - 拉取HTTP-FLV流进行分析参见另外一个demo：analyseflvts。 这个demo可能可以删除掉了。
+// - 拉取HTTP-FLV流进行分析参见另外一个demo：analyseflv。 这个demo可能可以删除掉了。
 
 func main() {
 	_ = nazalog.Init(func(option *nazalog.Option) {
 		option.AssertBehavior = nazalog.AssertFatal
 	})
 	defer nazalog.Sync()
+	base.LogoutStartInfo()
 
 	url := parseFlag()
 	session := httpflv.NewPullSession()
@@ -49,7 +50,7 @@ func parseFlag() string {
 	flag.Parse()
 	if *url == "" {
 		flag.Usage()
-		base.OSExitAndWaitPressIfWindows(1)
+		base.OsExitAndWaitPressIfWindows(1)
 	}
 	return *url
 }

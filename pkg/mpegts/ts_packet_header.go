@@ -12,7 +12,7 @@ import (
 	"github.com/q191201771/naza/pkg/nazabits"
 )
 
-// ------------------------------------------------
+// TsPacketHeader ------------------------------------------------
 // <iso13818-1.pdf> <2.4.3.2> <page 36/174>
 // sync_byte                    [8b]  * always 0x47
 // transport_error_indicator    [1b]
@@ -23,7 +23,7 @@ import (
 // adaptation_field_control     [2b]
 // continuity_counter           [4b]  *
 // ------------------------------------------------
-type TSPacketHeader struct {
+type TsPacketHeader struct {
 	Sync             uint8
 	Err              uint8
 	PayloadUnitStart uint8
@@ -31,10 +31,10 @@ type TSPacketHeader struct {
 	Pid              uint16
 	Scra             uint8
 	Adaptation       uint8
-	CC               uint8
+	Cc               uint8
 }
 
-// ----------------------------------------------------------
+// TsPacketAdaptation ----------------------------------------------------------
 // <iso13818-1.pdf> <Table 2-6> <page 40/174>
 // adaptation_field_length              [8b] * 不包括自己这1字节
 // discontinuity_indicator              [1b]
@@ -50,12 +50,12 @@ type TSPacketHeader struct {
 // reserved                             [6b]
 // program_clock_reference_extension    [9b] ******
 // ----------------------------------------------------------
-type TSPacketAdaptation struct {
+type TsPacketAdaptation struct {
 	Length uint8
 }
 
-// 解析4字节TS Packet header
-func ParseTSPacketHeader(b []byte) (h TSPacketHeader) {
+// ParseTsPacketHeader 解析4字节TS Packet header
+func ParseTsPacketHeader(b []byte) (h TsPacketHeader) {
 	// TODO chef: 检查长度
 	br := nazabits.NewBitReader(b)
 	h.Sync, _ = br.ReadBits8(8)
@@ -65,12 +65,12 @@ func ParseTSPacketHeader(b []byte) (h TSPacketHeader) {
 	h.Pid, _ = br.ReadBits16(13)
 	h.Scra, _ = br.ReadBits8(2)
 	h.Adaptation, _ = br.ReadBits8(2)
-	h.CC, _ = br.ReadBits8(4)
+	h.Cc, _ = br.ReadBits8(4)
 	return
 }
 
-// TODO chef
-func ParseTSPacketAdaptation(b []byte) (f TSPacketAdaptation) {
+// ParseTsPacketAdaptation TODO chef
+func ParseTsPacketAdaptation(b []byte) (f TsPacketAdaptation) {
 	br := nazabits.NewBitReader(b)
 	f.Length, _ = br.ReadBits8(8)
 	return

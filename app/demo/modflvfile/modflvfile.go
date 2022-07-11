@@ -40,23 +40,24 @@ func main() {
 		option.AssertBehavior = nazalog.AssertFatal
 	})
 	defer nazalog.Sync()
+	base.LogoutStartInfo()
 
 	var err error
 	inFileName, outFileName := parseFlag()
 
-	var ffr httpflv.FLVFileReader
+	var ffr httpflv.FlvFileReader
 	err = ffr.Open(inFileName)
 	nazalog.Assert(nil, err)
 	defer ffr.Dispose()
 	nazalog.Infof("open input flv file succ.")
 
-	var ffw httpflv.FLVFileWriter
+	var ffw httpflv.FlvFileWriter
 	err = ffw.Open(outFileName)
 	nazalog.Assert(nil, err)
 	defer ffw.Dispose()
 	nazalog.Infof("open output flv file succ.")
 
-	flvHeader, err := ffr.ReadFLVHeader()
+	flvHeader, err := ffr.ReadFlvHeader()
 	nazalog.Assert(nil, err)
 
 	err = ffw.WriteRaw(flvHeader)
@@ -77,11 +78,11 @@ func main() {
 
 func parseFlag() (string, string) {
 	i := flag.String("i", "", "specify input flv file")
-	o := flag.String("o", "", "specify ouput flv file")
+	o := flag.String("o", "", "specify output flv file")
 	flag.Parse()
 	if *i == "" || *o == "" {
 		flag.Usage()
-		base.OSExitAndWaitPressIfWindows(1)
+		base.OsExitAndWaitPressIfWindows(1)
 	}
 	return *i, *o
 }

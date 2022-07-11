@@ -15,7 +15,6 @@ import (
 
 	"github.com/q191201771/lal/pkg/rtmp"
 	"github.com/q191201771/naza/pkg/assert"
-	"github.com/q191201771/naza/pkg/nazalog"
 )
 
 func TestMetadata(t *testing.T) {
@@ -24,7 +23,7 @@ func TestMetadata(t *testing.T) {
 
 	opa, err := rtmp.ParseMetadata(b)
 	assert.Equal(t, nil, err)
-	nazalog.Debugf("%+v", opa)
+	rtmp.Log.Debugf("%+v", opa)
 
 	assert.Equal(t, 5, len(opa))
 	v := opa.Find("width")
@@ -36,5 +35,5 @@ func TestMetadata(t *testing.T) {
 	v = opa.Find("videocodecid")
 	assert.Equal(t, float64(7), v.(float64))
 	v = opa.Find("version")
-	assert.Equal(t, base.LALRTMPBuildMetadataEncoder, v.(string))
+	assert.Equal(t, base.LalRtmpBuildMetadataEncoder, v.(string))
 }

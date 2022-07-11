@@ -12,13 +12,12 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/q191201771/naza/pkg/bininfo"
-
 	"github.com/q191201771/lal/pkg/base"
 	"github.com/q191201771/naza/pkg/nazahttp"
-	"github.com/q191201771/naza/pkg/nazalog"
 )
 
+// TODO(chef): refactor 配置参数供外部传入
+// TODO(chef): refactor maxTaskLen修改为能表示是阻塞任务的意思
 var (
 	maxTaskLen       = 1024
 	notifyTimeoutSec = 3
@@ -29,50 +28,128 @@ type PostTask struct {
 	info interface{}
 }
 
-type HTTPNotify struct {
+type HttpNotify struct {
+	cfg HttpNotifyConfig
+
+	serverId string
+
 	taskQueue chan PostTask
 	client    *http.Client
 }
 
-var httpNotify *HTTPNotify
+func NewHttpNotify(cfg HttpNotifyConfig, serverId string) *HttpNotify {
+	httpNotify := &HttpNotify{
+		cfg:       cfg,
+		serverId:  serverId,
+		taskQueue: make(chan PostTask, maxTaskLen),
+		client: &http.Client{
+			Timeout: time.Duration(notifyTimeoutSec) * time.Second,
+		},
+	}
+	go httpNotify.RunLoop()
 
-// 注意，这里的函数命名以On开头并不是因为是回调函数，而是notify给业务方的接口叫做on_server_start
-func (h *HTTPNotify) OnServerStart() {
-	var info base.LALInfo
-	info.BinInfo = bininfo.StringifySingleLine()
-	info.LalVersion = base.LALVersion
-	info.APIVersion = base.HTTPAPIVersion
-	info.NotifyVersion = base.HTTPNotifyVersion
-	info.StartTime = serverStartTime
-	info.ServerID = config.ServerID
-	h.asyncPost(config.HTTPNotifyConfig.OnServerStart, info)
+	return httpNotify
 }
 
-func (h *HTTPNotify) OnUpdate(info base.UpdateInfo) {
-	h.asyncPost(config.HTTPNotifyConfig.OnUpdate, info)
+// TODO(chef): Dispose
+
+// ---------------------------------------------------------------------------------------------------------------------
+
+func (h *HttpNotify) NotifyServerStart(info base.LalInfo) {
+	info.ServerId = h.serverId
+	h.asyncPost(h.cfg.OnServerStart, info)
 }
 
-func (h *HTTPNotify) OnPubStart(info base.PubStartInfo) {
-	h.asyncPost(config.HTTPNotifyConfig.OnPubStart, info)
+func (h *HttpNotify) NotifyUpdate(info base.UpdateInfo) {
+	info.ServerId = h.serverId
+	h.asyncPost(h.cfg.OnUpdate, info)
 }
 
-func (h *HTTPNotify) OnPubStop(info base.PubStopInfo) {
-	h.asyncPost(config.HTTPNotifyConfig.OnPubStop, info)
+func (h *HttpNotify) NotifyPubStart(info base.PubStartInfo) {
+	info.ServerId = h.serverId
+	h.asyncPost(h.cfg.OnPubStart, info)
 }
 
-func (h *HTTPNotify) OnSubStart(info base.SubStartInfo) {
-	h.asyncPost(config.HTTPNotifyConfig.OnSubStart, info)
+func (h *HttpNotify) NotifyPubStop(info base.PubStopInfo) {
+	info.SessionId = h.serverId
+	h.asyncPost(h.cfg.OnPubStop, info)
 }
 
-func (h *HTTPNotify) OnSubStop(info base.SubStopInfo) {
-	h.asyncPost(config.HTTPNotifyConfig.OnSubStop, info)
+func (h *HttpNotify) NotifySubStart(info base.SubStartInfo) {
+	info.ServerId = h.serverId
+	h.asyncPost(h.cfg.OnSubStart, info)
 }
 
-func (h *HTTPNotify) OnRTMPConnect(info base.RTMPConnectInfo) {
-	h.asyncPost(config.HTTPNotifyConfig.OnRTMPConnect, info)
+func (h *HttpNotify) NotifySubStop(info base.SubStopInfo) {
+	info.ServerId = h.serverId
+	h.asyncPost(h.cfg.OnSubStop, info)
 }
 
-func (h *HTTPNotify) RunLoop() {
+func (h *HttpNotify) NotifyPullStart(info base.PullStartInfo) {
+	info.ServerId = h.serverId
+	h.asyncPost(h.cfg.OnRelayPullStart, info)
+}
+
+func (h *HttpNotify) NotifyPullStop(info base.PullStopInfo) {
+	info.ServerId = h.serverId
+	h.asyncPost(h.cfg.OnRelayPullStop, info)
+}
+
+func (h *HttpNotify) NotifyRtmpConnect(info base.RtmpConnectInfo) {
+	info.ServerId = h.serverId
+	h.asyncPost(h.cfg.OnRtmpConnect, info)
+}
+
+func (h *HttpNotify) NotifyOnHlsMakeTs(info base.HlsMakeTsInfo) {
+	info.ServerId = h.serverId
+	h.asyncPost(h.cfg.OnHlsMakeTs, info)
+}
+
+// ----- implement INotifyHandler interface ----------------------------------------------------------------------------
+
+func (h *HttpNotify) OnServerStart(info base.LalInfo) {
+	h.NotifyServerStart(info)
+}
+
+func (h *HttpNotify) OnUpdate(info base.UpdateInfo) {
+	h.NotifyUpdate(info)
+}
+
+func (h *HttpNotify) OnPubStart(info base.PubStartInfo) {
+	h.NotifyPubStart(info)
+}
+
+func (h *HttpNotify) OnPubStop(info base.PubStopInfo) {
+	h.NotifyPubStop(info)
+}
+
+func (h *HttpNotify) OnSubStart(info base.SubStartInfo) {
+	h.NotifySubStart(info)
+}
+
+func (h *HttpNotify) OnSubStop(info base.SubStopInfo) {
+	h.NotifySubStop(info)
+}
+
+func (h *HttpNotify) OnRelayPullStart(info base.PullStartInfo) {
+	h.NotifyPullStart(info)
+}
+
+func (h *HttpNotify) OnRelayPullStop(info base.PullStopInfo) {
+	h.NotifyPullStop(info)
+}
+
+func (h *HttpNotify) OnRtmpConnect(info base.RtmpConnectInfo) {
+	h.NotifyRtmpConnect(info)
+}
+
+func (h *HttpNotify) OnHlsMakeTs(info base.HlsMakeTsInfo) {
+	h.NotifyOnHlsMakeTs(info)
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+
+func (h *HttpNotify) RunLoop() {
 	for {
 		select {
 		case t := <-h.taskQueue:
@@ -81,8 +158,10 @@ func (h *HTTPNotify) RunLoop() {
 	}
 }
 
-func (h *HTTPNotify) asyncPost(url string, info interface{}) {
-	if !config.HTTPNotifyConfig.Enable || url == "" {
+// ---------------------------------------------------------------------------------------------------------------------
+
+func (h *HttpNotify) asyncPost(url string, info interface{}) {
+	if !h.cfg.Enable || url == "" {
 		return
 	}
 
@@ -90,24 +169,12 @@ func (h *HTTPNotify) asyncPost(url string, info interface{}) {
 	case h.taskQueue <- PostTask{url: url, info: info}:
 		// noop
 	default:
-		nazalog.Error("http notify queue full.")
+		Log.Error("http notify queue full.")
 	}
 }
 
-func (h *HTTPNotify) post(url string, info interface{}) {
+func (h *HttpNotify) post(url string, info interface{}) {
 	if _, err := nazahttp.PostJson(url, info, h.client); err != nil {
-		nazalog.Errorf("http notify post error. err=%+v", err)
+		Log.Errorf("http notify post error. err=%+v, url=%s, info=%+v", err, url, info)
 	}
-}
-
-// TODO chef: dispose
-
-func init() {
-	httpNotify = &HTTPNotify{
-		taskQueue: make(chan PostTask, maxTaskLen),
-		client: &http.Client{
-			Timeout: time.Duration(notifyTimeoutSec) * time.Second,
-		},
-	}
-	go httpNotify.RunLoop()
 }
