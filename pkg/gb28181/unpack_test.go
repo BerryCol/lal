@@ -10,7 +10,8 @@ package gb28181
 
 import (
 	"encoding/hex"
-	"fmt"
+	"github.com/q191201771/lal/pkg/base"
+	"github.com/q191201771/lal/pkg/hevc"
 	"github.com/q191201771/naza/pkg/nazamd5"
 	"io/ioutil"
 	"os"
@@ -66,9 +67,7 @@ var goldenRtpList = []string{
 }
 
 func TestPsUnpacker(t *testing.T) {
-	unpacker := NewPsUnpacker().WithOnVideo(func(payload []byte, dts int64, pts int64) {
-
-	})
+	unpacker := NewPsUnpacker()
 
 	for i, item := range goldenRtpList {
 		nazalog.Debugf("%d", i)
@@ -113,7 +112,6 @@ var hevcNalu = []byte{
 
 func TestPsUnpacker2(t *testing.T) {
 	// 解析别人提供的一些测试数据，开发阶段用
-
 	//test1()
 	//test2()
 }
@@ -122,23 +120,36 @@ func test1() {
 	nazalog.Debugf("[test1] > test1")
 	// 读取raw文件(包连在一起，不包含rtp header)，存取h264文件
 
-	b, err := ioutil.ReadFile("/tmp/udp.raw")
+	//b, err := ioutil.ReadFile("/tmp/udp.raw")
+	b, err := ioutil.ReadFile("/Volumes/T7/new/avfile/ka_at_13sec.ps")
 	nazalog.Assert(nil, err)
 
 	fp, err := os.Create("/tmp/udp.h264")
 	nazalog.Assert(nil, err)
 
 	waitingSps := true
-	unpacker := NewPsUnpacker().WithOnVideo(func(payload []byte, dts int64, pts int64) {
-		nazalog.Debugf("[test1] onVideo. length=%d", len(payload))
+	unpacker := NewPsUnpacker().WithOnAvPacket(func(packet *base.AvPacket) {
+		if !packet.IsVideo() {
+			return
+		}
+
+		nazalog.Debugf("[test1] onVideo. %s, %s", hevc.ParseNaluTypeReadable(packet.Payload[4]), packet.DebugString())
 		if waitingSps {
-			if avc.ParseNaluType(payload[4]) == avc.NaluTypeSps {
-				waitingSps = false
-			} else {
-				return
+			if packet.PayloadType == base.AvPacketPtAvc {
+				if avc.ParseNaluType(packet.Payload[4]) == avc.NaluTypeSps {
+					waitingSps = false
+				} else {
+					return
+				}
+			} else if packet.PayloadType == base.AvPacketPtHevc {
+				if hevc.ParseNaluType(packet.Payload[4]) == hevc.NaluTypeSps {
+					waitingSps = false
+				} else {
+					return
+				}
 			}
 		}
-		_, _ = fp.Write(payload)
+		_, _ = fp.Write(packet.Payload)
 	})
 	unpacker.FeedRtpBody(b, 0)
 
@@ -147,38 +158,35 @@ func test1() {
 	nazalog.Assert(nil, err)
 	nazalog.Assert("fd8dbe365152e212bf8cbabb7a99c1aa", nazamd5.Md5(out))
 }
+func TestRtpLossPacket(t *testing.T) {
+	// TODO(chef): [test] 应该对测试结果进行assert 202209
+	// TODO(chef): [refactor] 应该有构造数据的函数 202209
 
-func test2() {
-	// 一个udp包一个文件，按行分隔，hex stream格式如下
-	// 8060 0000 0000 0000 0beb c567 0000 01ba
-	// 46ab 1ea9 4401 0139 9ffe ffff 0094 ab0d
-
-	fp, err := os.Create("/tmp/udp2.h264")
-	nazalog.Assert(nil, err)
-	defer fp.Close()
-
-	fp2, err := os.Create("/tmp/udp2.aac")
-	nazalog.Assert(nil, err)
-	defer fp2.Close()
-
-	unpacker := NewPsUnpacker().WithOnAudio(func(payload []byte, dts int64, pts int64) {
-		nazalog.Infof("[test2] onAudio. length=%d, dts=%d", len(payload), dts)
-		_, _ = fp2.Write(payload)
-	}).WithOnVideo(func(payload []byte, dts int64, pts int64) {
-		nazalog.Infof("[test2] onVideo. length=%d, dts=%d", len(payload), dts)
-		_, _ = fp.Write(payload)
-	})
-
-	for i := 1; i < 1000; i++ {
-		//filename := fmt.Sprintf("/tmp/rtp-h264-aac/%d.ps", i)
-		filename := fmt.Sprintf("/tmp/rtp-ps-video/%d.ps", i)
-		b, err := ioutil.ReadFile(filename)
-		if err != nil {
-			nazalog.Errorf("%+v", err)
-			return
-		}
-
-		nazalog.Debugf("[test2] %d: %s", i, hex.EncodeToString(b[12:]))
-		unpacker.FeedRtpPacket(b)
+	// 测试永久性丢包时，内部丢弃无用数据的逻辑，以及内部之后恢复使用数据的逻辑
+	rtpPacks := [][]byte{
+		{128, 96, 0, 1, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 2, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 3, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 6, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 7, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 8, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 9, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 10, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 11, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 12, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 13, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 14, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 15, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 16, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 17, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 18, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 19, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 20, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+		{128, 96, 0, 21, 6, 203, 152, 224, 53, 182, 117, 59, 0, 0, 1, 186, 68, 108, 188, 88, 116, 1, 2, 143, 99, 254, 255, 255, 0, 0, 120, 124},
+	}
+	maxUnpackRtpListSize = 10
+	unpacker := NewPsUnpacker()
+	for _, rtp := range rtpPacks {
+		unpacker.FeedRtpPacket(rtp)
 	}
 }

@@ -21,11 +21,12 @@ import (
 
 // AvPacket2RtmpRemuxer AvPacket转换为RTMP
 //
-// 目前AvPacket来自
-// - RTSP的sdp以及rtp的合帧包
-// - 业务方通过接口向lalserver输入的流
-// - 理论上也支持webrtc，后续接入webrtc时再验证
+// 目前AvPacket来自:
 //
+// - RTSP: sdp以及rtp的合帧包
+// - gb28181 ps: rtp的合帧包
+// - customize: 业务方通过接口向lalserver输入的流
+// - 理论上也支持webrtc，后续接入webrtc时再验证
 type AvPacket2RtmpRemuxer struct {
 	option    base.AvPacketStreamOption
 	onRtmpMsg rtmp.OnReadRtmpAvMsg
@@ -37,6 +38,8 @@ type AvPacket2RtmpRemuxer struct {
 	vps []byte // 从AvPacket数据中获取
 	sps []byte
 	pps []byte
+
+	hasAdts2Asc bool
 }
 
 func NewAvPacket2RtmpRemuxer() *AvPacket2RtmpRemuxer {
@@ -47,6 +50,9 @@ func NewAvPacket2RtmpRemuxer() *AvPacket2RtmpRemuxer {
 	}
 }
 
+// WithOption
+//
+// TODO(chef): [refactor] 返回*AvPacket2RtmpRemuxer 202208
 func (r *AvPacket2RtmpRemuxer) WithOption(modOption func(option *base.AvPacketStreamOption)) {
 	modOption(&r.option)
 }
@@ -61,7 +67,6 @@ func (r *AvPacket2RtmpRemuxer) WithOnRtmpMsg(onRtmpMsg rtmp.OnReadRtmpAvMsg) *Av
 // OnRtpPacket OnSdp OnAvPacket
 //
 // 实现RTSP回调数据的接口 rtsp.IBaseInSessionObserver ，使得接入时方便些
-//
 func (r *AvPacket2RtmpRemuxer) OnRtpPacket(pkt rtprtcp.RtpPacket) {
 	// noop
 }
@@ -78,7 +83,6 @@ func (r *AvPacket2RtmpRemuxer) OnAvPacket(pkt base.AvPacket) {
 // 这里提供输入sdp的sps、pps等信息的机会，如果没有，可以不调用
 //
 // 内部不持有输入参数的内存块
-//
 func (r *AvPacket2RtmpRemuxer) InitWithAvConfig(asc, vps, sps, pps []byte) {
 	var err error
 	var bVsh []byte
@@ -107,7 +111,6 @@ func (r *AvPacket2RtmpRemuxer) InitWithAvConfig(asc, vps, sps, pps []byte) {
 			return
 		}
 	}
-
 	if r.videoType != base.AvPacketPtUnknown {
 		if r.videoType == base.AvPacketPtHevc {
 			bVsh, err = hevc.BuildSeqHeaderFromVpsSpsPps(vps, sps, pps)
@@ -138,12 +141,9 @@ func (r *AvPacket2RtmpRemuxer) InitWithAvConfig(asc, vps, sps, pps []byte) {
 // 输入 base.AvPacket 数据
 //
 // @param pkt:
-//
-//  - 如果是aac，格式是裸数据，不需要adts头
-//  - 如果是h264，格式是avcc或Annexb，具体取决于前面的配置
-//
-//  内部不持有该内存块
-//
+//   - 如果是aac，格式是裸数据或带adts头，具体取决于前面的配置。
+//   - 如果是h264，格式是avcc或Annexb，具体取决于前面的配置。
+//     内部不持有该内存块。
 func (r *AvPacket2RtmpRemuxer) FeedAvPacket(pkt base.AvPacket) {
 	switch pkt.PayloadType {
 	case base.AvPacketPtAvc:
@@ -162,13 +162,15 @@ func (r *AvPacket2RtmpRemuxer) FeedAvPacket(pkt base.AvPacket) {
 		}
 
 		pos := 5
-		maxLength := len(pkt.Payload) + pos
+		maxLength := len(pkt.Payload) + pos + len(nals)
 		payload := make([]byte, maxLength)
 
 		for _, nal := range nals {
 			if pkt.PayloadType == base.AvPacketPtAvc {
 				t := avc.ParseNaluType(nal[0])
-				if t == avc.NaluTypeSps || t == avc.NaluTypePps {
+				if t == avc.NaluTypeAud {
+					continue
+				} else if t == avc.NaluTypeSps || t == avc.NaluTypePps {
 					// 如果有sps，pps，先把它们抽离出来进行缓存
 					if t == avc.NaluTypeSps {
 						r.setSps(nal)
@@ -188,12 +190,24 @@ func (r *AvPacket2RtmpRemuxer) FeedAvPacket(pkt base.AvPacket) {
 							continue
 						}
 						r.emitRtmpAvMsg(false, bVsh, pkt.Timestamp)
+						//if !AvPacket2RtmpRemuxerAddSpsPps2KeyFrameFlag {
+						//	r.clearVideoSeqHeader()
+						//}
 						r.clearVideoSeqHeader()
 					}
 				} else {
 					// 重组实际数据
 
 					if t == avc.NaluTypeIdrSlice {
+						//if AvPacket2RtmpRemuxerAddSpsPps2KeyFrameFlag {
+						//	// 关键帧 组合sps vps与数据帧
+						//	nal = append(append(avc.BuildSpsPps2Annexb(r.sps, r.pps)[4:], hevc.NaluStartCode4...), nal...)
+						//	// 考虑feed时 无sps 与pps数据
+						//	if len(pkt.Payload) < len(nal) {
+						//		maxLength = len(nal) + pos
+						//		payload = make([]byte, maxLength)
+						//	}
+						//}
 						payload[0] = base.RtmpAvcKeyFrame
 					} else {
 						payload[0] = base.RtmpAvcInterFrame
@@ -206,7 +220,9 @@ func (r *AvPacket2RtmpRemuxer) FeedAvPacket(pkt base.AvPacket) {
 				}
 			} else if pkt.PayloadType == base.AvPacketPtHevc {
 				t := hevc.ParseNaluType(nal[0])
-				if t == hevc.NaluTypeVps || t == hevc.NaluTypeSps || t == hevc.NaluTypePps {
+				if t == hevc.NaluTypeAud {
+					continue
+				} else if t == hevc.NaluTypeVps || t == hevc.NaluTypeSps || t == hevc.NaluTypePps {
 					if t == hevc.NaluTypeVps {
 						r.setVps(nal)
 					} else if t == hevc.NaluTypeSps {
@@ -221,10 +237,26 @@ func (r *AvPacket2RtmpRemuxer) FeedAvPacket(pkt base.AvPacket) {
 							continue
 						}
 						r.emitRtmpAvMsg(false, bVsh, pkt.Timestamp)
+						//if !AvPacket2RtmpRemuxerAddSpsPps2KeyFrameFlag {
+						//	r.clearVideoSeqHeader()
+						//}
 						r.clearVideoSeqHeader()
 					}
 				} else {
 					if hevc.IsIrapNalu(t) {
+						//if AvPacket2RtmpRemuxerAddSpsPps2KeyFrameFlag {
+						//	// 关键帧 组合vps sps pps与数据帧
+						//	annexb, err := hevc.BuildVpsSpsPps2Annexb(r.vps, r.sps, r.pps)
+						//	if err != nil {
+						//		Log.Errorf("build hevc vps sps pps data failed. err=%+v", err)
+						//	}
+						//	nal = append(append(annexb[4:], hevc.NaluStartCode4...), nal...)
+						//	// 考虑feed时 无sps 与pps数据
+						//	if len(pkt.Payload) < len(nal) {
+						//		maxLength = len(nal) + pos
+						//		payload = make([]byte, maxLength)
+						//	}
+						//}
 						payload[0] = base.RtmpHevcKeyFrame
 					} else {
 						payload[0] = base.RtmpHevcInterFrame
@@ -244,13 +276,34 @@ func (r *AvPacket2RtmpRemuxer) FeedAvPacket(pkt base.AvPacket) {
 		}
 
 	case base.AvPacketPtAac:
-		length := len(pkt.Payload) + 2
-		payload := make([]byte, length)
-		// TODO(chef) 处理此处的魔数0xAF
-		payload[0] = 0xAF
-		payload[1] = base.RtmpAacPacketTypeRaw
-		copy(payload[2:], pkt.Payload)
-		r.emitRtmpAvMsg(true, payload, pkt.Timestamp)
+		if r.option.AudioFormat == base.AvPacketStreamAudioFormatRawAac {
+			length := len(pkt.Payload) + 2
+			payload := make([]byte, length)
+			// TODO(chef) 处理此处的魔数0xAF
+			payload[0] = 0xAF
+			payload[1] = base.RtmpAacPacketTypeRaw
+			copy(payload[2:], pkt.Payload)
+			r.emitRtmpAvMsg(true, payload, pkt.Timestamp)
+		} else if r.option.AudioFormat == base.AvPacketStreamAudioFormatAdtsAac {
+			if !r.hasAdts2Asc {
+				adts, err := aac.MakeAudioDataSeqHeaderWithAdtsHeader(pkt.Payload)
+				if err != nil {
+					Log.Errorf("%+v", err)
+				}
+
+				r.emitRtmpAvMsg(true, adts, pkt.Timestamp)
+
+				r.hasAdts2Asc = true
+			}
+
+			length := len(pkt.Payload) - 5 // -7+2
+			payload := make([]byte, length)
+			payload[0] = 0xAF
+			payload[1] = base.RtmpAacPacketTypeRaw
+			copy(payload[2:], pkt.Payload[7:])
+			r.emitRtmpAvMsg(true, payload, pkt.Timestamp)
+		}
+
 	default:
 		Log.Warnf("unsupported packet. type=%d", pkt.PayloadType)
 	}

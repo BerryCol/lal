@@ -8,11 +8,10 @@
 
 package rtprtcp
 
-
 type RtpUnpackContainer struct {
 	unpackerProtocol IRtpUnpackerProtocol
 
-	list         RtpPacketList
+	list RtpPacketList
 }
 
 func NewRtpUnpackContainer(maxSize int, unpackerProtocol IRtpUnpackerProtocol) *RtpUnpackContainer {
@@ -71,7 +70,6 @@ func (r *RtpUnpackContainer) Feed(pkt RtpPacket) {
 }
 
 // tryUnpackOneSequential 从队列头部，尝试合成一个完整的帧。保证这次合成的帧的首个seq和上次合成帧的尾部seq是连续的
-//
 func (r *RtpUnpackContainer) tryUnpackOneSequential() bool {
 	if !r.list.IsFirstSequential() {
 		return false
@@ -81,11 +79,10 @@ func (r *RtpUnpackContainer) tryUnpackOneSequential() bool {
 }
 
 // tryUnpackOne 从队列头部，尝试合成一个完整的帧。不保证这次合成的帧的首个seq和上次合成帧的尾部seq是连续的
-//
 func (r *RtpUnpackContainer) tryUnpackOne() bool {
 	unpackedFlag, unpackedSeq := r.unpackerProtocol.TryUnpackOne(&r.list)
 	if unpackedFlag {
-		r.list.SetUnpackedSeq(unpackedSeq)
+		r.list.SetDoneSeq(unpackedSeq)
 	}
 	return unpackedFlag
 }

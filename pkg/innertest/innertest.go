@@ -312,7 +312,8 @@ func entry() {
 		fileTagCount, httpflvPullTagCount.Load(), rtmpPullTagCount.Load(), rtspPullAvPacketCount.Load())
 
 	compareFile()
-	assert.Equal(t, strings.ReplaceAll(goldenRtspSdpList[mode], "\n", "\r\n"), string(rtspSdpCtx.RawSdp))
+	goldenRtspSdpTmplList[mode] = strings.ReplaceAll(goldenRtspSdpTmplList[mode], "{atoolv}", base.LalPackSdp)
+	assert.Equal(t, strings.ReplaceAll(goldenRtspSdpTmplList[mode], "\n", "\r\n"), string(rtspSdpCtx.RawSdp))
 }
 
 func compareFile() {
@@ -380,7 +381,7 @@ func getAllHttpApi(addr string) {
 	Log.Assert(nil, err)
 	Log.Debugf("%s", string(b))
 
-	var ackos base.ApiCtrlKickSession
+	var ackos base.ApiCtrlKickSessionReq
 	b, err = httpPost(fmt.Sprintf("http://%s/api/ctrl/kick_session", addr), &ackos)
 	Log.Assert(nil, err)
 	Log.Debugf("%s", string(b))
@@ -452,16 +453,16 @@ var (
 	goldenHlsTsNumList = []int{8, 10, 8}
 	goldenHlsTsLenList = []int{2219152, 525648, 1696512}
 	goldenHlsTsMd5List = []string{
-		"48db6251d40c271fd11b05650f074e0f",
+		"b60463d6cde1f48e33dfa6fc8f15032c",
 		"2eb19ad498688dadf950b3e749985922",
-		"2d1e5c1a3ca385e0b55b2cff2f52b710",
+		"c53351cff80532717b680d098452bf9b",
 	}
 
 	goldenHttptsLenList = []int{2216332, 522264, 1693880}
 	goldenHttptsMd5List = []string{
-		"03f8eac7d2c3d5d85056c410f5fcc756",
+		"3d1c1cd75e09ad04cb8a96db28865692",
 		"0d102b6fb7fc3134e56a07f00292e888",
-		"651a2b5c93370738d81995f8fd49af4d",
+		"4bb1b0752e3fb396bffb2c16c38ebfb4",
 	}
 )
 
@@ -482,7 +483,7 @@ innertest-1642375465000-4.ts
 innertest-1642375465000-5.ts
 #EXTINF:4.000,
 innertest-1642375465000-6.ts
-#EXTINF:2.621,
+#EXTINF:2.644,
 innertest-1642375465000-7.ts
 #EXT-X-ENDLIST
 `,
@@ -549,7 +550,7 @@ innertest-1642375465000-4.ts
 innertest-1642375465000-5.ts
 #EXTINF:4.000,
 innertest-1642375465000-6.ts
-#EXTINF:2.621,
+#EXTINF:2.644,
 innertest-1642375465000-7.ts
 #EXT-X-ENDLIST
 `,
@@ -607,13 +608,13 @@ innertest-1642375465000-7.ts
 `,
 }
 
-var goldenRtspSdpList = []string{
+var goldenRtspSdpTmplList = []string{
 	`v=0
 o=- 0 0 IN IP4 127.0.0.1
 s=No Name
 c=IN IP4 127.0.0.1
 t=0 0
-a=tool:lal 0.30.1
+a=tool:{atoolv}
 m=video 0 RTP/AVP 96
 a=rtpmap:96 H264/90000
 a=fmtp:96 packetization-mode=1; sprop-parameter-sets=Z2QAFqyyAUBf8uAiAAADAAIAAAMAPB4sXJA=,aOvDyyLA; profile-level-id=640016
@@ -629,7 +630,7 @@ o=- 0 0 IN IP4 127.0.0.1
 s=No Name
 c=IN IP4 127.0.0.1
 t=0 0
-a=tool:lal 0.30.1
+a=tool:{atoolv}
 m=audio 0 RTP/AVP 97
 b=AS:128
 a=rtpmap:97 MPEG4-GENERIC/44100/2
@@ -641,7 +642,7 @@ o=- 0 0 IN IP4 127.0.0.1
 s=No Name
 c=IN IP4 127.0.0.1
 t=0 0
-a=tool:lal 0.30.1
+a=tool:{atoolv}
 m=video 0 RTP/AVP 96
 a=rtpmap:96 H264/90000
 a=fmtp:96 packetization-mode=1; sprop-parameter-sets=Z2QAFqyyAUBf8uAiAAADAAIAAAMAPB4sXJA=,aOvDyyLA; profile-level-id=640016

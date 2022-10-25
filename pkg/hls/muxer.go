@@ -34,7 +34,6 @@ type IMuxerObserver interface {
 // MuxerConfig
 //
 // 各字段含义见文档： https://pengrl.com/lal/#/ConfigBrief
-//
 type MuxerConfig struct {
 	OutPath            string `json:"out_path"`
 	FragmentDurationMs int    `json:"fragment_duration_ms"`
@@ -52,7 +51,6 @@ const (
 // Muxer
 //
 // 输入mpegts流，输出hls(m3u8+ts)至文件中
-//
 type Muxer struct {
 	UniqueKey string
 
@@ -96,7 +94,6 @@ type fragmentInfo struct {
 // NewMuxer
 //
 // @param observer 可以为nil，如果不为nil，TS流将回调给上层
-//
 func NewMuxer(streamName string, config *MuxerConfig, observer IMuxerObserver) *Muxer {
 	uk := base.GenUkHlsMuxer()
 	op := PathStrategy.GetMuxerOutPath(config.OutPath, streamName)
@@ -137,7 +134,6 @@ func (m *Muxer) Dispose() {
 // OnPatPmt OnTsPackets
 //
 // 实现 remux.IRtmp2MpegtsRemuxerObserver，方便直接将 remux.Rtmp2MpegtsRemuxer 的数据喂入 hls.Muxer
-//
 func (m *Muxer) OnPatPmt(b []byte) {
 	m.FeedPatPmt(b)
 }
@@ -153,13 +149,13 @@ func (m *Muxer) FeedPatPmt(b []byte) {
 }
 
 func (m *Muxer) FeedMpegts(tsPackets []byte, frame *mpegts.Frame, boundary bool) {
+	//Log.Debugf("> FeedMpegts. boundary=%v, frame=%p, sid=%d", boundary, frame, frame.Sid)
 	if frame.Sid == mpegts.StreamIdAudio {
 		// TODO(chef): 为什么音频用pts，视频用dts
 		if err := m.updateFragment(frame.Pts, boundary); err != nil {
 			Log.Errorf("[%s] update fragment error. err=%+v", m.UniqueKey, err)
 			return
 		}
-		// TODO(chef): 有updateFragment的返回值判断，这里的判断可以考虑删除
 		if !m.opened {
 			Log.Warnf("[%s] FeedMpegts A not opened. boundary=%t", m.UniqueKey, boundary)
 			return
@@ -170,8 +166,8 @@ func (m *Muxer) FeedMpegts(tsPackets []byte, frame *mpegts.Frame, boundary bool)
 			Log.Errorf("[%s] update fragment error. err=%+v", m.UniqueKey, err)
 			return
 		}
-		// TODO(chef): 有updateFragment的返回值判断，这里的判断可以考虑删除
 		if !m.opened {
+			// 走到这，可能是第一个包并且boundary为false
 			Log.Warnf("[%s] FeedMpegts V not opened. boundary=%t, key=%t", m.UniqueKey, boundary, frame.Key)
 			return
 		}
@@ -197,7 +193,6 @@ func (m *Muxer) OutPath() string {
 // @param boundary: 调用方认为可能是开启新TS切片的时间点
 //
 // @return: 理论上，只有文件操作失败才会返回错误
-//
 func (m *Muxer) updateFragment(ts uint64, boundary bool) error {
 	discont := true
 
@@ -267,7 +262,6 @@ func (m *Muxer) updateFragment(ts uint64, boundary bool) error {
 // @param discont: 不连续标志，会在m3u8文件的fragment前增加`#EXT-X-DISCONTINUITY`
 //
 // @return: 理论上，只有文件操作失败才会返回错误
-//
 func (m *Muxer) openFragment(ts uint64, discont bool) error {
 	if m.opened {
 		return nazaerrors.Wrap(base.ErrHls)
@@ -316,7 +310,6 @@ func (m *Muxer) openFragment(ts uint64, discont bool) error {
 // closeFragment
 //
 // @return: 理论上，只有文件操作失败才会返回错误
-//
 func (m *Muxer) closeFragment(isLast bool) error {
 	if !m.opened {
 		// 注意，首次调用closeFragment时，有可能opened为false

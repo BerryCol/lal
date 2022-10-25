@@ -24,7 +24,6 @@ const (
 )
 
 // MessagePacker 打包并发送 rtmp 信令
-//
 type MessagePacker struct {
 	b *Buffer
 }
@@ -36,7 +35,6 @@ func NewMessagePacker() *MessagePacker {
 }
 
 // 注意，这个函数只会打包一个chunk头，所以调用方应自己保证在`bodyLen`小于chunk size时使用
-//
 func writeSingleChunkHeader(out []byte, csid int, bodyLen int, typeid uint8, streamid int) {
 	// 目前这个函数只供发送信令时调用，信令的 csid 都是小于等于 63 的，如果传入的 csid 大于 63，直接 panic
 	if csid > 63 {
@@ -192,7 +190,14 @@ func (packer *MessagePacker) writePublish(writer io.Writer, appName string, stre
 	_ = Amf0.WriteNumber(packer.b, float64(tidClientPublish))
 	_ = Amf0.WriteNull(packer.b)
 	_ = Amf0.WriteString(packer.b, streamName)
-	_ = Amf0.WriteString(packer.b, appName)
+
+	// <spec-rtmp_specification_1.0.pdf>
+	// 7.2.2.6.  publish
+	//
+	// Type of publishing.
+	// Set to "live": Live data is published without recording it in a file.
+	//
+	_ = Amf0.WriteString(packer.b, "live")
 
 	return packer.ChunkAndWrite(writer, csidOverStream, base.RtmpTypeIdCommandMessageAmf0, streamid)
 }

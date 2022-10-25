@@ -15,49 +15,49 @@ import (
 // GopCache
 //
 // 提供两个功能:
-//   1. 缓存Metadata, VideoSeqHeader, AacSeqHeader
-//   2. 缓存音视频GOP数据
+//  1. 缓存Metadata, VideoSeqHeader, AacSeqHeader
+//  2. 缓存音视频GOP数据
 //
 // 以下，只讨论GopCache的第2点功能
 //
-// 音频和视频都会缓存
+// 音频和视频都会缓存。
 //
-// GopCache也可能不缓存GOP数据，见NewGopCache函数的gopNum参数说明
+// GopCache也可能不缓存GOP数据，见NewGopCache函数的gopNum参数说明。
 //
-// 以下，我们只讨论gopNum > 0(也即gopSize > 1)的情况
+// 以下，我们只讨论gopNum > 0(也即gopSize > 1)的情况。
 //
-// GopCache为空时，只有输入了关键帧，才能开启GOP缓存，非关键帧以及音频数据不会被缓存
-// 因此，单音频的流是ok的，相当于不缓存任何数据
+// GopCache为空时，只有输入了关键帧，才能开启GOP缓存，非关键帧以及音频数据不会被缓存。
+// 因此，单音频的流是ok的，相当于不缓存任何数据。
 //
-// GopCache不为空时，输入关键帧触发生成新的GOP元素，其他情况则往最后一个GOP元素一直追加
+// GopCache不为空时，输入关键帧触发生成新的GOP元素，其他情况则往最后一个GOP元素一直追加。
 //
-// first用于读取第一个GOP（可能不完整），last的前一个用于写入当前GOP
+// first用于读取第一个GOP（可能不完整），last的前一个用于写入当前GOP。
 //
-// 最近不完整的GOP也会被缓存，见NewGopCache函数的gopNum参数说明
+// 最近不完整的GOP也会被缓存，见NewGopCache函数的gopNum参数说明。
 //
 // -----
 // gopNum  = 1
 // gopSize = 2
 //
-//              first     |   first       |       first   | 在后面两个状态间转换，就不画了
-//                |       |     |         |        |      |
-//                0   1   |     0   1	  |    0   1      |
-//                *   *   |     *   *	  |    *   *      |
-//                |       |         |	  |    |          |
-//              last      |        last   |   last        |
-//                        |               |               |
-//              (empty)   |   (full)      |   (full)      |
+//	first     |   first       |       first   | 在后面两个状态间转换，就不画了
+//	  |       |     |         |        |      |
+//	  0   1   |     0   1	  |    0   1      |
+//	  *   *   |     *   *	  |    *   *      |
+//	  |       |         |	  |    |          |
+//	last      |        last   |   last        |
+//	          |               |               |
+//	(empty)   |   (full)      |   (full)      |
+//
 // GetGopCount: 0         |   1           |   1           |
 // -----
-//
-//
 type GopCache struct {
 	t         string
 	uniqueKey string
 
-	Metadata       []byte
-	VideoSeqHeader []byte
-	AacSeqHeader   []byte
+	MetadataEnsureWithSetDataFrame    []byte
+	MetadataEnsureWithoutSetDataFrame []byte
+	VideoSeqHeader                    []byte
+	AacSeqHeader                      []byte
 
 	gopRing      []Gop
 	gopRingFirst int
@@ -67,12 +67,9 @@ type GopCache struct {
 
 // NewGopCache
 //
-// @param gopNum:
-//  gop缓存大小
-//
-//  - 如果为0，则不缓存音频数据，也即GOP缓存功能不生效
-//  - 如果>0，则缓存[0, gopNum]个GOP，最多缓存 gopNum 个GOP。注意，最后一个GOP可能是不完整的
-//
+// @param gopNum: gop缓存大小。
+//   - 如果为0，则不缓存音频数据，也即GOP缓存功能不生效。
+//   - 如果>0，则缓存[0, gopNum]个GOP，最多缓存 gopNum 个GOP。注意，最后一个GOP可能是不完整的。
 func NewGopCache(t string, uniqueKey string, gopNum int) *GopCache {
 	return &GopCache{
 		t:            t,
@@ -86,25 +83,33 @@ func NewGopCache(t string, uniqueKey string, gopNum int) *GopCache {
 
 type LazyGet func() []byte
 
+func (gc *GopCache) SetMetadata(w []byte, wo []byte) {
+	// TODO(chef): [refactor] 将metadata等缓存逻辑从GopCache中移除 202207
+
+	gc.MetadataEnsureWithSetDataFrame = w
+	gc.MetadataEnsureWithoutSetDataFrame = wo
+	Log.Debugf("[%s] cache %s metadata. size:%d", gc.uniqueKey, gc.t, len(gc.MetadataEnsureWithSetDataFrame))
+}
+
 // Feed
 //
 // @param lg: 内部可能持有lg返回的内存块
-//
-func (gc *GopCache) Feed(msg base.RtmpMsg, lg LazyGet) {
+func (gc *GopCache) Feed(msg base.RtmpMsg, b []byte) {
+	// TODO(chef): [refactor] 重构lg两个参数这种方式 202207
+
 	switch msg.Header.MsgTypeId {
 	case base.RtmpTypeIdMetadata:
-		gc.Metadata = lg()
-		Log.Debugf("[%s] cache %s metadata. size:%d", gc.uniqueKey, gc.t, len(gc.Metadata))
+		// noop
 		return
 	case base.RtmpTypeIdAudio:
 		if msg.IsAacSeqHeader() {
-			gc.AacSeqHeader = lg()
+			gc.AacSeqHeader = b
 			Log.Debugf("[%s] cache %s aac seq header. size:%d", gc.uniqueKey, gc.t, len(gc.AacSeqHeader))
 			return
 		}
 	case base.RtmpTypeIdVideo:
 		if msg.IsVideoKeySeqHeader() {
-			gc.VideoSeqHeader = lg()
+			gc.VideoSeqHeader = b
 			Log.Debugf("[%s] cache %s video seq header. size:%d", gc.uniqueKey, gc.t, len(gc.VideoSeqHeader))
 			return
 		}
@@ -112,15 +117,14 @@ func (gc *GopCache) Feed(msg base.RtmpMsg, lg LazyGet) {
 
 	if gc.gopSize > 1 {
 		if msg.IsVideoKeyNalu() {
-			gc.feedNewGop(msg, lg())
+			gc.feedNewGop(msg, b)
 		} else {
-			gc.feedLastGop(msg, lg())
+			gc.feedLastGop(msg, b)
 		}
 	}
 }
 
 // GetGopCount 获取GOP数量，注意，最后一个可能是不完整的
-//
 func (gc *GopCache) GetGopCount() int {
 	return (gc.gopRingLast + gc.gopSize - gc.gopRingFirst) % gc.gopSize
 }
@@ -133,7 +137,8 @@ func (gc *GopCache) GetGopDataAt(pos int) [][]byte {
 }
 
 func (gc *GopCache) Clear() {
-	gc.Metadata = nil
+	gc.MetadataEnsureWithSetDataFrame = nil
+	gc.MetadataEnsureWithoutSetDataFrame = nil
 	gc.VideoSeqHeader = nil
 	gc.AacSeqHeader = nil
 	gc.gopRingLast = 0
@@ -146,7 +151,6 @@ func (gc *GopCache) Clear() {
 //
 // 往最后一个GOP元素追加一个msg
 // 注意，如果GopCache为空，则不缓存msg
-//
 func (gc *GopCache) feedLastGop(msg base.RtmpMsg, b []byte) {
 	if !gc.isGopRingEmpty() {
 		gc.gopRing[(gc.gopRingLast-1+gc.gopSize)%gc.gopSize].Feed(msg, b)
@@ -156,7 +160,6 @@ func (gc *GopCache) feedLastGop(msg base.RtmpMsg, b []byte) {
 // feedNewGop
 //
 // 生成一个最新的GOP元素，并往里追加一个msg
-//
 func (gc *GopCache) feedNewGop(msg base.RtmpMsg, b []byte) {
 	if gc.isGopRingFull() {
 		gc.gopRingFirst = (gc.gopRingFirst + 1) % gc.gopSize
@@ -183,7 +186,6 @@ type Gop struct {
 // Feed
 //
 // @param b: 内部持有`b`内存块
-//
 func (g *Gop) Feed(msg base.RtmpMsg, b []byte) {
 	g.data = append(g.data, b)
 }

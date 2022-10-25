@@ -10,7 +10,7 @@ package base
 
 // ----- 所有session -----
 //
-// server.pub:  rtmp(ServerSession), rtsp(PubSession)
+// server.pub:  rtmp(ServerSession), rtsp(PubSession), customize(CustomizePubSessionContext), ps(gb28181.PubSession)
 // server.sub:  rtmp(ServerSession), rtsp(SubSession), flv(SubSession), ts(SubSession), 还有一个比较特殊的hls
 //
 // client.push: rtmp(PushSession), rtsp(PushSession)
@@ -38,12 +38,14 @@ const (
 	SessionTypeFlvSub            SessionType = SessionProtocolFlv<<8 | SessionBaseTypeSub
 	SessionTypeFlvPull           SessionType = SessionProtocolFlv<<8 | SessionBaseTypePull
 	SessionTypeTsSub             SessionType = SessionProtocolTs<<8 | SessionBaseTypeSub
+	SessionTypePsPub             SessionType = SessionProtocolPs<<8 | SessionBaseTypePub
 
 	SessionProtocolCustomize = 1
 	SessionProtocolRtmp      = 2
 	SessionProtocolRtsp      = 3
 	SessionProtocolFlv       = 4
 	SessionProtocolTs        = 5
+	SessionProtocolPs        = 6
 
 	SessionBaseTypePubSub = 1
 	SessionBaseTypePub    = 2
@@ -56,6 +58,7 @@ const (
 	SessionProtocolRtspStr      = "RTSP"
 	SessionProtocolFlvStr       = "FLV"
 	SessionProtocolTsStr        = "TS"
+	SessionProtocolPsStr        = "PS"
 
 	SessionBaseTypePubSubStr = "PUBSUB"
 	SessionBaseTypePubStr    = "PUB"
@@ -63,38 +66,6 @@ const (
 	SessionBaseTypePushStr   = "PUSH"
 	SessionBaseTypePullStr   = "PULL"
 )
-
-//func (protocol SessionProtocol) Stringify() string {
-//	switch protocol {
-//	case SessionProtocolCustomize:
-//		return SessionProtocolCustomizeStr
-//	case SessionProtocolRtmp:
-//		return SessionProtocolRtmpStr
-//	case SessionProtocolRtsp:
-//		return SessionProtocolRtspStr
-//	case SessionProtocolFlv:
-//		return SessionProtocolFlvStr
-//	case SessionProtocolTs:
-//		return SessionProtocolTsStr
-//	}
-//	return "INVALID"
-//}
-//
-//func (typ SessionBaseType) Stringify() string {
-//	switch typ {
-//	case SessionBaseTypePubSub:
-//		return SessionBaseTypePubSubStr
-//	case SessionBaseTypePub:
-//		return SessionBaseTypePubStr
-//	case SessionBaseTypeSub:
-//		return SessionBaseTypeSubStr
-//	case SessionBaseTypePush:
-//		return SessionBaseTypePushStr
-//	case SessionBaseTypePull:
-//		return SessionBaseTypePullStr
-//	}
-//	return "INVALID"
-//}
 
 type ISession interface {
 	ISessionUrlContext
@@ -169,7 +140,6 @@ type IServerSessionLifecycle interface {
 // ISessionStat
 //
 // 调用约束：对于Client类型的Session，调用Start函数并返回成功后才能调用，否则行为未定义
-//
 type ISessionStat interface {
 	// UpdateStat
 	//
@@ -183,7 +153,7 @@ type ISessionStat interface {
 	//
 	// 获取session状态
 	//
-	// @return 注意，结构体中的`Bitrate`的值由最近一次`func UpdateStat`调用计算决定，其他值为当前最新值
+	// @return 注意，结构体中的`BitrateKbits`的值由最近一次`func UpdateStat`调用计算决定，其他值为当前最新值
 	//
 	GetStat() StatSession
 
@@ -202,7 +172,6 @@ type ISessionStat interface {
 // ISessionUrlContext 获取和流地址相关的信息
 //
 // 调用约束：对于Client类型的Session，调用Start函数并返回成功后才能调用，否则行为未定义
-//
 type ISessionUrlContext interface {
 	Url() string
 	AppName() string
@@ -217,13 +186,6 @@ type IObject interface {
 	//
 	UniqueKey() string
 }
-
-//type ISessionType interface {
-//	Protocol() string
-//	BaseType() string
-//
-//	//UniqueKey() string
-//}
 
 // TODO chef: rtmp.ClientSession修改为BaseClientSession更好些
 

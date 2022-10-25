@@ -8,6 +8,8 @@
 
 package rtprtcp
 
+// h264的格式：
+//
 // rfc3984 5.2.  Common Structure of the RTP Payload Format
 // Table 1.  Summary of NAL unit types and their payload structures
 //
@@ -22,26 +24,34 @@ package rtprtcp
 // 28     FU-A      Fragmentation unit                 5.8
 // 29     FU-B      Fragmentation unit                 5.8
 // 30-31  undefined                                    -
+//
+// h265的格式：
+//
+// rfc7798
+// 4.4.2.  Aggregation Packets (APs)
+// 4.4.3.  Fragmentation Units
 
 const (
 	NaluTypeAvcSingleMax = 23
 	NaluTypeAvcStapa     = 24 // one packet, multiple nals
 	NaluTypeAvcFua       = 28
 
-	// NaluTypeHevcFua TODO(chef): hevc有stapa格式吗
+	NaluTypeHevcAp  = 48
 	NaluTypeHevcFua = 49
 )
 
 // CompareSeq 比较序号的值，内部处理序号翻转问题，见单元测试中的例子
-// @return  0 a和b相等
-//          1 a大于b
-//         -1 a小于b
+//
+// @return
+//   - 0 a和b相等
+//   - 1 a大于b
+//   - -1 a小于b
 func CompareSeq(a, b uint16) int {
 	if a == b {
 		return 0
 	}
 	if a > b {
-		if a-b < 16384 {
+		if a-b < 32768 {
 			return 1
 		}
 
@@ -49,7 +59,7 @@ func CompareSeq(a, b uint16) int {
 	}
 
 	// must be a < b
-	if b-a < 16384 {
+	if b-a < 32768 {
 		return -1
 	}
 

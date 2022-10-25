@@ -13,6 +13,10 @@ import (
 	"github.com/q191201771/naza/pkg/nazalog"
 )
 
+type IStatable interface {
+	GetStat() connection.Stat // TODO(chef): [refactor] 考虑为 nazanet.UdpConnection 实现这个接口
+}
+
 // BasicSessionStat
 //
 // 包含两部分功能：
@@ -20,7 +24,6 @@ import (
 // 2. 计算带宽
 //
 // 计算带宽有两种方式，一种是通过外部的 connection.Connection 获取最新状态，一种是内部自己管理状态
-//
 type BasicSessionStat struct {
 	stat StatSession
 
@@ -35,7 +38,6 @@ type BasicSessionStat struct {
 // NewBasicSessionStat
 //
 // @param remoteAddr: 如果当前未知，填入""空字符串
-//
 func NewBasicSessionStat(sessionType SessionType, remoteAddr string) BasicSessionStat {
 	var s BasicSessionStat
 	s.stat.typ = sessionType
@@ -76,6 +78,10 @@ func NewBasicSessionStat(sessionType SessionType, remoteAddr string) BasicSessio
 		s.stat.SessionId = GenUkFlvSubSession()
 		s.stat.BaseType = SessionBaseTypeSubStr
 		s.stat.Protocol = SessionProtocolFlvStr
+	case SessionTypePsPub:
+		s.stat.SessionId = GenUkPsPubSession()
+		s.stat.BaseType = SessionBaseTypePubStr
+		s.stat.Protocol = SessionProtocolPsStr
 	}
 	return s
 }
@@ -102,7 +108,7 @@ func (s *BasicSessionStat) UpdateStat(intervalSec uint32) {
 	s.updateStat(s.currConnStat.ReadBytesSum.Load(), s.currConnStat.WroteBytesSum.Load(), s.stat.BaseType, intervalSec)
 }
 
-func (s *BasicSessionStat) UpdateStatWitchConn(conn connection.Connection, intervalSec uint32) {
+func (s *BasicSessionStat) UpdateStatWitchConn(conn IStatable, intervalSec uint32) {
 	currStat := conn.GetStat()
 	s.updateStat(currStat.ReadBytesSum, currStat.WroteBytesSum, s.stat.BaseType, intervalSec)
 }
@@ -113,7 +119,7 @@ func (s *BasicSessionStat) GetStat() StatSession {
 	return s.stat
 }
 
-func (s *BasicSessionStat) GetStatWithConn(conn connection.Connection) StatSession {
+func (s *BasicSessionStat) GetStatWithConn(conn IStatable) StatSession {
 	connStat := conn.GetStat()
 	s.stat.ReadBytesSum = connStat.ReadBytesSum
 	s.stat.WroteBytesSum = connStat.WroteBytesSum
@@ -124,7 +130,7 @@ func (s *BasicSessionStat) IsAlive() (readAlive, writeAlive bool) {
 	return s.isAlive(s.currConnStat.ReadBytesSum.Load(), s.currConnStat.WroteBytesSum.Load())
 }
 
-func (s *BasicSessionStat) IsAliveWitchConn(conn connection.Connection) (readAlive, writeAlive bool) {
+func (s *BasicSessionStat) IsAliveWitchConn(conn IStatable) (readAlive, writeAlive bool) {
 	currStat := conn.GetStat()
 	return s.isAlive(currStat.ReadBytesSum, currStat.WroteBytesSum)
 }
@@ -141,17 +147,18 @@ func (s *BasicSessionStat) UniqueKey() string {
 
 // ---------------------------------------------------------------------------------------------------------------------
 
+// updateStat 根据两次调用间隔计算bitrate
 func (s *BasicSessionStat) updateStat(readBytesSum, wroteBytesSum uint64, typ string, intervalSec uint32) {
 	rDiff := readBytesSum - s.prevConnStat.ReadBytesSum
-	s.stat.ReadBitrate = int(rDiff * 8 / 1024 / uint64(intervalSec))
+	s.stat.ReadBitrateKbits = int(rDiff * 8 / 1024 / uint64(intervalSec))
 	wDiff := wroteBytesSum - s.prevConnStat.WroteBytesSum
-	s.stat.WriteBitrate = int(wDiff * 8 / 1024 / uint64(intervalSec))
+	s.stat.WriteBitrateKbits = int(wDiff * 8 / 1024 / uint64(intervalSec))
 
 	switch typ {
 	case SessionBaseTypePubStr, SessionBaseTypePullStr:
-		s.stat.Bitrate = s.stat.ReadBitrate
+		s.stat.BitrateKbits = s.stat.ReadBitrateKbits
 	case SessionBaseTypeSubStr, SessionBaseTypePushStr:
-		s.stat.Bitrate = s.stat.WriteBitrate
+		s.stat.BitrateKbits = s.stat.WriteBitrateKbits
 	default:
 		nazalog.Errorf("invalid session base type. type=%s", typ)
 	}
@@ -160,6 +167,7 @@ func (s *BasicSessionStat) updateStat(readBytesSum, wroteBytesSum uint64, typ st
 	s.prevConnStat.WroteBytesSum = wroteBytesSum
 }
 
+// isAlive 根据两次调用间隔计算是否存活
 func (s *BasicSessionStat) isAlive(readBytesSum, wroteBytesSum uint64) (readAlive, writeAlive bool) {
 	if s.staleStat == nil {
 		s.staleStat = new(connection.Stat)

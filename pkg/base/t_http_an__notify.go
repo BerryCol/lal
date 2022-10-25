@@ -11,13 +11,11 @@ package base
 // 文档见： https://pengrl.com/lal/#/HTTPNotify
 
 // EventCommonInfo 所有事件共有的字段
-//
 type EventCommonInfo struct {
 	ServerId string `json:"server_id"`
 }
 
 // SessionEventCommonInfo session相关的事件的共有的字段
-//
 type SessionEventCommonInfo struct {
 	EventCommonInfo
 
@@ -33,6 +31,10 @@ type SessionEventCommonInfo struct {
 
 	HasInSession  bool `json:"has_in_session"`
 	HasOutSession bool `json:"has_out_session"`
+
+	// TODO(chef): [opt] 这两个字段，实际需求出发点是有业务方需要在stop事件做流量统计，但是现在的实现为所有session事件都添加了，是否合适 202208
+	ReadBytesSum  uint64 `json:"read_bytes_sum"`
+	WroteBytesSum uint64 `json:"wrote_bytes_sum"`
 }
 
 type UpdateInfo struct {
@@ -141,5 +143,7 @@ func session2EventCommonInfo(session ISession) SessionEventCommonInfo {
 	info.StreamName = session.StreamName()
 	info.Url = session.Url()
 	info.UrlParam = session.RawQuery()
+	info.ReadBytesSum = stat.ReadBytesSum
+	info.WroteBytesSum = stat.WroteBytesSum
 	return info
 }

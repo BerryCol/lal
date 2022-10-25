@@ -18,7 +18,6 @@ import (
 // 使用场景：一般是输入流转换为输出流时。
 // 目的：使得流格式更标准。
 // 做法：设置 MsgStreamId 和 Csid，其他字段保持`in`的值。
-//
 func MakeDefaultRtmpHeader(in base.RtmpHeader) (out base.RtmpHeader) {
 	out.MsgLen = in.MsgLen
 	out.TimestampAbs = in.TimestampAbs
@@ -38,21 +37,48 @@ func MakeDefaultRtmpHeader(in base.RtmpHeader) (out base.RtmpHeader) {
 // ---------------------------------------------------------------------------------------------------------------------
 
 // LazyRtmpChunkDivider 在必要时，有且仅有一次做切分成chunk的操作
-//
 type LazyRtmpChunkDivider struct {
-	message []byte
-	header  *base.RtmpHeader
-	chunks  []byte
+	msg              base.RtmpMsg
+	chunksWithSdf    []byte
+	chunksWithoutSdf []byte
 }
 
-func (lcd *LazyRtmpChunkDivider) Init(message []byte, header *base.RtmpHeader) {
-	lcd.message = message
-	lcd.header = header
+func (lcd *LazyRtmpChunkDivider) Init(msg base.RtmpMsg) {
+	lcd.msg = msg
 }
 
-func (lcd *LazyRtmpChunkDivider) Get() []byte {
-	if lcd.chunks == nil {
-		lcd.chunks = rtmp.Message2Chunks(lcd.message, lcd.header)
+func (lcd *LazyRtmpChunkDivider) GetEnsureWithSdf() []byte {
+	if lcd.chunksWithSdf == nil {
+		var msg []byte
+		if lcd.msg.Header.MsgTypeId == base.RtmpTypeIdMetadata {
+			msg2 := lcd.msg.Clone()
+			msg2.Payload, _ = rtmp.MetadataEnsureWithSdf(msg2.Payload)
+			msg2.Header.MsgLen = uint32(len(msg2.Payload))
+			msg2.Header = MakeDefaultRtmpHeader(msg2.Header)
+			lcd.chunksWithSdf = rtmp.Message2Chunks(msg2.Payload, &msg2.Header)
+		} else {
+			msg = lcd.msg.Payload
+			h := MakeDefaultRtmpHeader(lcd.msg.Header)
+			lcd.chunksWithSdf = rtmp.Message2Chunks(msg, &h)
+		}
 	}
-	return lcd.chunks
+	return lcd.chunksWithSdf
+}
+
+func (lcd *LazyRtmpChunkDivider) GetEnsureWithoutSdf() []byte {
+	if lcd.chunksWithoutSdf == nil {
+		var msg []byte
+		if lcd.msg.Header.MsgTypeId == base.RtmpTypeIdMetadata {
+			msg2 := lcd.msg.Clone()
+			msg2.Payload, _ = rtmp.MetadataEnsureWithoutSdf(msg2.Payload)
+			msg2.Header.MsgLen = uint32(len(msg2.Payload))
+			msg2.Header = MakeDefaultRtmpHeader(msg2.Header)
+			lcd.chunksWithoutSdf = rtmp.Message2Chunks(msg2.Payload, &msg2.Header)
+		} else {
+			msg = lcd.msg.Payload
+			h := MakeDefaultRtmpHeader(lcd.msg.Header)
+			lcd.chunksWithoutSdf = rtmp.Message2Chunks(msg, &h)
+		}
+	}
+	return lcd.chunksWithoutSdf
 }

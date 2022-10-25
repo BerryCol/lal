@@ -27,6 +27,7 @@ const (
 	DefaultHttpsPort = 443
 	DefaultRtspPort  = 554
 	DefaultRtmpsPort = 443
+	DefaultRtspsPort = 322
 )
 
 type UrlPathContext struct {
@@ -85,9 +86,9 @@ func (u *UrlContext) calcFilenameAndTypeIfNeeded() {
 
 // ParseUrl
 //
-// @param defaultPort: 注意，如果rawUrl中显示指定了端口，则该参数不生效
-//                     注意，如果设置为-1，内部依然会对常见协议(http, https, rtmp, rtsp)设置官方默认端口
-//
+// @param defaultPort:
+// 注意，如果rawUrl中显示指定了端口，则该参数不生效。
+// 注意，如果设置为-1，内部依然会对常见协议(http, https, rtmp, rtsp)设置官方默认端口。
 func ParseUrl(rawUrl string, defaultPort int) (ctx UrlContext, err error) {
 	ctx.Url = rawUrl
 
@@ -112,6 +113,8 @@ func ParseUrl(rawUrl string, defaultPort int) (ctx UrlContext, err error) {
 			defaultPort = DefaultRtspPort
 		case "rtmps":
 			defaultPort = DefaultRtmpsPort
+		case "rtsps":
+			defaultPort = DefaultRtspsPort
 		}
 	}
 
@@ -167,6 +170,7 @@ func ParseRtmpUrl(rawUrl string) (ctx UrlContext, err error) {
 		return ctx, fmt.Errorf("%w. url=%s", ErrInvalidUrl, rawUrl)
 	}
 
+	// 处理特殊case，具体见 testParseRtmpUrlCase1
 	// 注意，使用ffmpeg推流时，会把`rtmp://127.0.0.1/test110`中的test110作为appName(streamName则为空)
 	// 这种其实已不算十分合法的rtmp url了
 	// 我们这里也处理一下，和ffmpeg保持一致
@@ -175,6 +179,24 @@ func ParseRtmpUrl(rawUrl string) (ctx UrlContext, err error) {
 		ctx.PathWithoutLastItem = ctx.LastItemOfPath
 		ctx.LastItemOfPath = tmp
 	}
+
+	// 处理特殊case, 具体见 testParseRtmpUrlCase2
+	//
+	// PathWithRawQuery:/vyun?vhost=thirdVhost?token=88F4/lss_7
+	//
+	// Path:/vyun-----------------------------------------------> /vyun?vhost=thirdVhost?token=88F4/lss_7
+	// PathWithoutLastItem:vyun---------------------------------> vyun?vhost=thirdVhost?token=88F4
+	// LastItemOfPath:------------------------------------------> lss_7
+	// RawQuery:vhost=thirdVhost?token=88F4/lss_7---------------> 空
+	//
+	if strings.Count(ctx.PathWithRawQuery, "?") > 1 {
+		index := strings.LastIndexByte(ctx.PathWithRawQuery, '/')
+		ctx.Path = ctx.PathWithRawQuery
+		ctx.PathWithoutLastItem = ctx.PathWithRawQuery[1:index]
+		ctx.LastItemOfPath = ctx.PathWithRawQuery[index+1:]
+		ctx.RawQuery = ""
+	}
+
 	return
 }
 
@@ -184,7 +206,7 @@ func ParseRtspUrl(rawUrl string) (ctx UrlContext, err error) {
 		return
 	}
 	// 注意，存在一种情况，使用rtsp pull session，直接拉取没有url path的流，所以不检查ctx.Path
-	if ctx.Scheme != "rtsp" || ctx.Host == "" {
+	if (ctx.Scheme != "rtsp" && ctx.Scheme != "rtsps") || ctx.Host == "" {
 		return ctx, fmt.Errorf("%w. url=%s", ErrInvalidUrl, rawUrl)
 	}
 
@@ -200,7 +222,6 @@ func ParseHttpflvUrl(rawUrl string) (ctx UrlContext, err error) {
 // ParseHttpRequest
 //
 // @return 完整url
-//
 func ParseHttpRequest(req *http.Request) string {
 	// TODO(chef): [refactor] scheme是否能从从req.URL.Scheme获取
 	var scheme string

@@ -41,13 +41,12 @@ type ILalServer interface {
 	StatGroup(streamName string) *base.StatGroup
 	CtrlStartRelayPull(info base.ApiCtrlStartRelayPullReq) base.ApiCtrlStartRelayPull
 	CtrlStopRelayPull(streamName string) base.ApiCtrlStopRelayPull
-	CtrlKickSession(info base.ApiCtrlKickSession) base.HttpResponseBasic
+	CtrlKickSession(info base.ApiCtrlKickSessionReq) base.HttpResponseBasic
 }
 
 // NewLalServer 创建一个lal server
 //
 // @param modOption: 定制化配置。可变参数，如果不关心，可以不填，具体字段见 Option
-//
 func NewLalServer(modOption ...ModOption) ILalServer {
 	return NewServerManager(modOption...)
 }
@@ -66,7 +65,6 @@ type ICustomizePubSessionContext interface {
 // ---------------------------------------------------------------------------------------------------------------------
 
 // INotifyHandler 事件通知接口
-//
 type INotifyHandler interface {
 	OnServerStart(info base.LalInfo)
 	OnUpdate(info base.UpdateInfo)
@@ -81,9 +79,17 @@ type INotifyHandler interface {
 }
 
 type Option struct {
-	// ConfFilename 配置文件，注意，如果为空，内部会尝试从 DefaultConfFilenameList 读取默认配置文件
+	// ConfFilename 配置文件。
 	//
+	// 注意，如果为空，内部会尝试从 DefaultConfFilenameList 读取默认配置文件
 	ConfFilename string
+
+	// ConfRawContent 配置内容，json格式。
+	//
+	// 应用场景：有的业务方配置内容并非从配置文件中读取，比如集成 ILalServer 时配置内容来自配置中心网络下发，所以提供这个字段供业务方直接传入配置内容。
+	//
+	// 注意，读取加载配置的优先级是 ConfRawContent > ConfFilename > DefaultConfFilenameList
+	ConfRawContent []byte
 
 	// NotifyHandler
 	//
@@ -93,6 +99,18 @@ type Option struct {
 	// 注意，如果业务方实现了自己的事件监听，则lal server内部不再走http notify的逻辑（也即二选一）。
 	//
 	NotifyHandler INotifyHandler
+
+	// TODO(chef): [refactor] 考虑用INotifyHandler实现ModConfigGroupCreator和IAuthentication 202209
+
+	// ModConfigGroupCreator
+	// This func help us modify the group configuration base on appName or streamName
+	// so that group can have it own configuration (configuration can be in other source like db)
+	// It will help us reduce resource usage if we just want some specific group record flv or hls...
+	ModConfigGroupCreator ModConfigGroupCreator
+
+	// Authentication
+	// This interface make authenticate customizable so that we can implement any authenticate strategy like jwt...
+	Authentication IAuthentication
 }
 
 var defaultOption = Option{
@@ -102,7 +120,6 @@ var defaultOption = Option{
 type ModOption func(option *Option)
 
 // DefaultConfFilenameList 没有指定配置文件时，按顺序作为优先级，找到第一个存在的并使用
-//
 var DefaultConfFilenameList = []string{
 	filepath.FromSlash("lalserver.conf.json"),
 	filepath.FromSlash("./conf/lalserver.conf.json"),

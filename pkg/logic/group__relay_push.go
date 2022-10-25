@@ -64,13 +64,13 @@ func (group *Group) initRelayPushByConfig() {
 }
 
 // startPushIfNeeded 必要时进行replay push转推
-//
 func (group *Group) startPushIfNeeded() {
 	// push转推功能没开
 	if !group.pushEnable {
 		return
 	}
 	// 没有pub发布者
+	// TODO(chef): [refactor] 判断所有pub是否存在的方式 202208
 	if group.rtmpPubSession == nil && group.rtspPubSession == nil {
 		return
 	}

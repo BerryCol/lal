@@ -45,12 +45,14 @@ func (h *HttpApiServer) Listen() (err error) {
 func (h *HttpApiServer) RunLoop() error {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/api/stat/lal_info", h.statLalInfoHandler)
 	mux.HandleFunc("/api/stat/group", h.statGroupHandler)
 	mux.HandleFunc("/api/stat/all_group", h.statAllGroupHandler)
+	mux.HandleFunc("/api/stat/lal_info", h.statLalInfoHandler)
+
 	mux.HandleFunc("/api/ctrl/start_relay_pull", h.ctrlStartRelayPullHandler)
 	mux.HandleFunc("/api/ctrl/stop_relay_pull", h.ctrlStopRelayPullHandler)
 	mux.HandleFunc("/api/ctrl/kick_session", h.ctrlKickSessionHandler)
+	mux.HandleFunc("/api/ctrl/start_rtp_pub", h.ctrlStartRtpPubHandler)
 	mux.HandleFunc("/", h.notFoundHandler)
 
 	var srv http.Server
@@ -160,11 +162,11 @@ func (h *HttpApiServer) ctrlStopRelayPullHandler(w http.ResponseWriter, req *htt
 
 func (h *HttpApiServer) ctrlKickSessionHandler(w http.ResponseWriter, req *http.Request) {
 	var v base.HttpResponseBasic
-	var info base.ApiCtrlKickSession
+	var info base.ApiCtrlKickSessionReq
 
 	_, err := unmarshalRequestJsonBody(req, &info, "stream_name", "session_id")
 	if err != nil {
-		Log.Warnf("http api kick out session error. err=%+v", err)
+		Log.Warnf("http api kick session error. err=%+v", err)
 		v.ErrorCode = base.ErrorCodeParamMissing
 		v.Desp = base.DespParamMissing
 		feedback(v, w)
@@ -178,6 +180,37 @@ func (h *HttpApiServer) ctrlKickSessionHandler(w http.ResponseWriter, req *http.
 	return
 }
 
+func (h *HttpApiServer) ctrlStartRtpPubHandler(w http.ResponseWriter, req *http.Request) {
+	var v base.ApiCtrlStartRtpPub
+	var info base.ApiCtrlStartRtpPubReq
+
+	j, err := unmarshalRequestJsonBody(req, &info, "stream_name")
+	if err != nil {
+		Log.Warnf("http api start rtp pub error. err=%+v", err)
+		v.ErrorCode = base.ErrorCodeParamMissing
+		v.Desp = base.DespParamMissing
+		feedback(v, w)
+		return
+	}
+
+	if !j.Exist("timeout_ms") {
+		info.TimeoutMs = 60000
+	}
+	// 不存在时默认0值的，不需要手动写了
+	//if !j.Exist("port") {
+	//	info.Port = 0
+	//}
+	//if !j.Exist("is_tcp_flag") {
+	//	info.IsTcpFlag = 0
+	//}
+
+	Log.Infof("http api start rtp pub. req info=%+v", info)
+
+	resp := h.sm.CtrlStartRtpPub(info)
+	feedback(resp, w)
+	return
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 
 func (h *HttpApiServer) notFoundHandler(w http.ResponseWriter, req *http.Request) {
@@ -187,13 +220,13 @@ func (h *HttpApiServer) notFoundHandler(w http.ResponseWriter, req *http.Request
 func feedback(v interface{}, w http.ResponseWriter) {
 	resp, _ := json.Marshal(v)
 	w.Header().Add("Server", base.LalHttpApiServer)
+	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(resp)
 }
 
 // unmarshalRequestJsonBody
 //
 // TODO(chef): [refactor] 搬到naza中 202205
-//
 func unmarshalRequestJsonBody(r *http.Request, info interface{}, keyFieldList ...string) (nazajson.Json, error) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
