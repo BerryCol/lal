@@ -9,8 +9,9 @@
 package logic
 
 import (
-	"github.com/q191201771/lal/pkg/base"
 	"path/filepath"
+
+	"github.com/q191201771/lal/pkg/base"
 )
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -27,7 +28,9 @@ type ILalServer interface {
 	//
 	AddCustomizePubSession(streamName string) (ICustomizePubSessionContext, error)
 
-	// DelCustomizePubSession 将 ICustomizePubSessionContext 从 ILalServer 中删除
+	// DelCustomizePubSession 将 ICustomizePubSessionContext 对象从 ILalServer 中删除
+	//
+	// 注意，业务方调用该函数后，就不要再使用该 ICustomizePubSessionContext 对象的方法了，比如继续 FeedAvPacket 是无效的
 	//
 	DelCustomizePubSession(ICustomizePubSessionContext)
 
@@ -57,6 +60,8 @@ type ICustomizePubSessionContext interface {
 	// IAvPacketStream 传入音视频数据相关的接口。详细说明见 base.IAvPacketStream
 	//
 	base.IAvPacketStream
+
+	FeedRtmpMsg(msg base.RtmpMsg) error
 
 	UniqueKey() string
 	StreamName() string
