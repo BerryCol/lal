@@ -65,6 +65,10 @@ import (
 //                                                                                                                                              -> ...
 //                                                                                                                                              -> ...
 
+type GroupOption struct {
+	onHookSession func(uniqueKey string, streamName string) ICustomizeHookSessionContext
+}
+
 type IGroupObserver interface {
 	CleanupHlsIfNeeded(appName string, streamName string, path string)
 	OnHlsMakeTs(info base.HlsMakeTsInfo)
@@ -77,7 +81,11 @@ type Group struct {
 	appName    string // const after init
 	streamName string // const after init TODO chef: 和stat里的字段重复，可以删除掉
 	config     *Config
-	observer   IGroupObserver
+
+	option                      GroupOption
+	customizeHookSessionContext ICustomizeHookSessionContext
+
+	observer IGroupObserver
 
 	exitChan chan struct{}
 
@@ -133,7 +141,7 @@ type Group struct {
 	rtspPullDumpFile *base.DumpFile
 }
 
-func NewGroup(appName string, streamName string, config *Config, observer IGroupObserver) *Group {
+func NewGroup(appName string, streamName string, config *Config, option GroupOption, observer IGroupObserver) *Group {
 	uk := base.GenUkGroup()
 
 	g := &Group{
@@ -141,23 +149,28 @@ func NewGroup(appName string, streamName string, config *Config, observer IGroup
 		appName:    appName,
 		streamName: streamName,
 		config:     config,
+		option:     option,
 		observer:   observer,
 		stat: base.StatGroup{
 			StreamName: streamName,
 			AppName:    appName,
 		},
-		exitChan:                      make(chan struct{}, 1),
-		rtmpSubSessionSet:             make(map[*rtmp.ServerSession]struct{}),
-		httpflvSubSessionSet:          make(map[*httpflv.SubSession]struct{}),
-		httptsSubSessionSet:           make(map[*httpts.SubSession]struct{}),
-		rtspSubSessionSet:             make(map[*rtsp.SubSession]struct{}),
-		waitRtspSubSessionSet:         make(map[*rtsp.SubSession]struct{}),
-		hlsSubSessionSet:              make(map[*hls.SubSession]struct{}),
-		rtmpGopCache:                  remux.NewGopCache("rtmp", uk, config.RtmpConfig.GopNum, config.RtmpConfig.SingleGopMaxFrameNum),
-		httpflvGopCache:               remux.NewGopCache("httpflv", uk, config.HttpflvConfig.GopNum, config.HttpflvConfig.SingleGopMaxFrameNum),
-		httptsGopCache:                remux.NewGopCacheMpegts(uk, config.HttptsConfig.GopNum, config.HttptsConfig.SingleGopMaxFrameNum),
-		psPubPrevInactiveCheckTick:    -1,
-		hlsCalcSessionStatIntervalSec: uint32(config.HlsConfig.FragmentDurationMs/1000) * 10,
+		exitChan:                   make(chan struct{}, 1),
+		rtmpSubSessionSet:          make(map[*rtmp.ServerSession]struct{}),
+		httpflvSubSessionSet:       make(map[*httpflv.SubSession]struct{}),
+		httptsSubSessionSet:        make(map[*httpts.SubSession]struct{}),
+		rtspSubSessionSet:          make(map[*rtsp.SubSession]struct{}),
+		waitRtspSubSessionSet:      make(map[*rtsp.SubSession]struct{}),
+		hlsSubSessionSet:           make(map[*hls.SubSession]struct{}),
+		rtmpGopCache:               remux.NewGopCache("rtmp", uk, config.RtmpConfig.GopNum, config.RtmpConfig.SingleGopMaxFrameNum),
+		httpflvGopCache:            remux.NewGopCache("httpflv", uk, config.HttpflvConfig.GopNum, config.HttpflvConfig.SingleGopMaxFrameNum),
+		httptsGopCache:             remux.NewGopCacheMpegts(uk, config.HttptsConfig.GopNum, config.HttptsConfig.SingleGopMaxFrameNum),
+		psPubPrevInactiveCheckTick: -1,
+	}
+
+	g.hlsCalcSessionStatIntervalSec = uint32(config.HlsConfig.FragmentDurationMs / 100) // equals to (ms/1000) * 10
+	if g.hlsCalcSessionStatIntervalSec == 0 {
+		g.hlsCalcSessionStatIntervalSec = defaultHlsCalcSessionStatIntervalSec
 	}
 
 	g.initRelayPushByConfig()

@@ -11,7 +11,6 @@ package logic
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	_ "net/http/pprof"
 	"os"
@@ -49,6 +48,8 @@ type ServerManager struct {
 
 	mutex        sync.Mutex
 	groupManager IGroupManager
+
+	onHookSession func(uniqueKey string, streamName string) ICustomizeHookSessionContext
 }
 
 func NewServerManager(modOption ...ModOption) *ServerManager {
@@ -87,7 +88,7 @@ Doc: %s
 			}
 		}
 		var err error
-		rawContent, err = ioutil.ReadFile(confFile)
+		rawContent, err = os.ReadFile(confFile)
 		if err != nil {
 			_, _ = fmt.Fprintf(os.Stderr, "read conf file failed. file=%s err=%+v", confFile, err)
 			base.OsExitAndWaitPressIfWindows(1)
@@ -394,6 +395,10 @@ func (sm *ServerManager) DelCustomizePubSession(sessionCtx ICustomizePubSessionC
 		return
 	}
 	group.DelCustomizePubSession(sessionCtx)
+}
+
+func (sm *ServerManager) WithOnHookSession(onHookSession func(uniqueKey string, streamName string) ICustomizeHookSessionContext) {
+	sm.onHookSession = onHookSession
 }
 
 // ----- implement rtmp.IServerObserver interface -----------------------------------------------------------------------
@@ -710,7 +715,10 @@ func (sm *ServerManager) CreateGroup(appName string, streamName string) *Group {
 	} else {
 		config = sm.config
 	}
-	return NewGroup(appName, streamName, config, sm)
+	option := GroupOption{
+		onHookSession: sm.onHookSession,
+	}
+	return NewGroup(appName, streamName, config, option, sm)
 }
 
 // ----- implement IGroupObserver interface -----------------------------------------------------------------------------

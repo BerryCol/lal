@@ -15,7 +15,9 @@ package base
 
 const (
 	// AudioCodecAac StatGroup.AudioCodec
-	AudioCodecAac = "AAC"
+	AudioCodecAac   = "AAC"
+	AudioCodecG711U = "PCMU"
+	AudioCodecG711A = "PCMA"
 
 	// VideoCodecAvc StatGroup.VideoCodec
 	VideoCodecAvc  = "H264"
@@ -28,6 +30,7 @@ type LalInfo struct {
 	LalVersion    string `json:"lal_version"`
 	ApiVersion    string `json:"api_version"`
 	NotifyVersion string `json:"notify_version"`
+	WebUiVersion  string `json:"WebUiVersion"`
 	StartTime     string `json:"start_time"`
 }
 

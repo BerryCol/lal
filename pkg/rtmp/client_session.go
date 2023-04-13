@@ -74,11 +74,21 @@ type ClientSessionOption struct {
 	WriteBufSize  int // io层发送音视频数据的缓冲大小，如果为0，则没有缓冲
 	WriteChanSize int // io层发送音视频数据的异步队列大小，如果为0，则同步发送
 
-	HandshakeComplexFlag bool // 握手是否使用复杂模式
-
+	ReuseReadMessageBufferFlag bool // 接收Message时，是否重用内存块
+	// PeerWinAckSize
+	//
+	// 设置发送 base.RtmpTypeIdAck 的触发阈值的默认值。
+	// 如果没收到 base.RtmpTypeIdWinAckSize，则使用该默认值作为阈值；
+	// 如果收到 base.RtmpTypeIdWinAckSize，则使用收到的值作为阈值。
 	PeerWinAckSize int
 
-	ReuseReadMessageBufferFlag bool // 接收Message时，是否重用内存块
+	HandshakeComplexFlag bool // 握手是否使用复杂模式
+	// TlsConfig
+	// rtmps时使用。
+	// 不关心可以不填。
+	// 业务方可以通过这个字段自定义 tls.Config
+	// 注意，如果使用rtmps并且该字段为nil，那么内部会使用 base.DefaultTlsConfigClient 生成 tls.Config
+	TlsConfig *tls.Config
 }
 
 var defaultClientSessOption = ClientSessionOption{
@@ -107,6 +117,10 @@ func NewClientSession(sessionType base.SessionType, modOptions ...ModClientSessi
 		hc = &HandshakeClientComplex{}
 	} else {
 		hc = &HandshakeClientSimple{}
+	}
+
+	if option.TlsConfig == nil {
+		option.TlsConfig = base.DefaultTlsConfigClient()
 	}
 
 	cc := NewChunkComposer()
@@ -291,12 +305,7 @@ func (s *ClientSession) tcpConnect() error {
 
 	var conn net.Conn
 	if s.urlCtx.Scheme == "rtmps" {
-		// rtmps跳过证书认证
-		conf := &tls.Config{
-			InsecureSkipVerify: true,
-		}
-
-		if conn, err = tls.Dial("tcp", s.urlCtx.HostWithPort, conf); err != nil {
+		if conn, err = tls.Dial("tcp", s.urlCtx.HostWithPort, s.option.TlsConfig); err != nil {
 			return err
 		}
 	} else {
@@ -342,10 +351,8 @@ func (s *ClientSession) runReadLoop() {
 }
 
 func (s *ClientSession) doMsg(stream *Stream) error {
-	if s.sessionStat.BaseType() == base.SessionBaseTypePullStr {
-		if err := s.doRespAcknowledgement(stream); err != nil {
-			return err
-		}
+	if err := s.writeAcknowledgementIfNeeded(stream); err != nil {
+		return err
 	}
 
 	switch stream.header.MsgTypeId {
@@ -625,11 +632,12 @@ func (s *ClientSession) doProtocolControlMessage(stream *Stream) error {
 	return nil
 }
 
-func (s *ClientSession) doRespAcknowledgement(stream *Stream) error {
+func (s *ClientSession) writeAcknowledgementIfNeeded(stream *Stream) error {
 	// https://github.com/q191201771/lal/pull/154
 	if s.option.PeerWinAckSize <= 0 {
 		return nil
 	}
+
 	currStat := s.conn.GetStat()
 	delta := uint32(currStat.ReadBytesSum - s.recvLastAck)
 	//此次接收小于窗口大小一半，不处理
@@ -639,7 +647,7 @@ func (s *ClientSession) doRespAcknowledgement(stream *Stream) error {
 	s.recvLastAck = currStat.ReadBytesSum
 	seqNum := s.seqNum + delta
 	//当序列号溢出时，将其重置
-	if seqNum > 0xf0000000 {
+	if seqNum > ackSeqMax {
 		seqNum = delta
 	}
 	s.seqNum = seqNum

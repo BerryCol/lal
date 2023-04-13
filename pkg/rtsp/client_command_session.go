@@ -389,29 +389,49 @@ func (session *ClientCommandSession) writeAnnounce() error {
 }
 
 func (session *ClientCommandSession) writeSetup() error {
-	if session.sdpCtx.HasVideoAControl() {
-		uri := session.sdpCtx.MakeVideoSetupUri(session.urlCtx.RawUrlWithoutUserInfo)
+	setup := func(setupUri string) error {
 		if session.option.OverTcp {
-			if err := session.writeOneSetupTcp(uri); err != nil {
-				return err
+			if err := session.writeOneSetupTcp(setupUri); err != nil {
+				// 461情况下尝试切换UDP重试
+				if err == base.ErrRtspUnsupportedTransport {
+					if err := session.writeOneSetup(setupUri); err != nil {
+						return err
+					}
+
+					session.option.OverTcp = false
+				} else {
+					return err
+				}
 			}
 		} else {
-			if err := session.writeOneSetup(uri); err != nil {
-				return err
+			if err := session.writeOneSetup(setupUri); err != nil {
+				// 461情况尝试切换TCP重试
+				if err == base.ErrRtspUnsupportedTransport {
+					if err = session.writeOneSetupTcp(setupUri); err != nil {
+						return err
+					}
+
+					session.option.OverTcp = true
+				} else {
+					return err
+				}
 			}
+		}
+
+		return nil
+	}
+
+	if session.sdpCtx.HasVideoAControl() {
+		uri := session.sdpCtx.MakeVideoSetupUri(session.urlCtx.RawUrlWithoutUserInfo)
+		if err := setup(uri); err != nil {
+			return err
 		}
 	}
 	// can't else if
 	if session.sdpCtx.HasAudioAControl() {
 		uri := session.sdpCtx.MakeAudioSetupUri(session.urlCtx.RawUrlWithoutUserInfo)
-		if session.option.OverTcp {
-			if err := session.writeOneSetupTcp(uri); err != nil {
-				return err
-			}
-		} else {
-			if err := session.writeOneSetup(uri); err != nil {
-				return err
-			}
+		if err := setup(uri); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -435,6 +455,12 @@ func (session *ClientCommandSession) writeOneSetup(setupUri string) error {
 	}
 	ctx, err := session.writeCmdReadResp(MethodSetup, setupUri, headers, "")
 	if err != nil {
+		return err
+	}
+
+	if ctx.StatusCode == "461" {
+		// 切换transport尝试继续
+		err = base.ErrRtspUnsupportedTransport
 		return err
 	}
 
@@ -505,6 +531,11 @@ func (session *ClientCommandSession) writeOneSetupTcp(setupUri string) error {
 	}
 	ctx, err := session.writeCmdReadResp(MethodSetup, setupUri, headers, "")
 	if err != nil {
+		return err
+	}
+
+	if ctx.StatusCode == "461" {
+		err = base.ErrRtspUnsupportedTransport
 		return err
 	}
 

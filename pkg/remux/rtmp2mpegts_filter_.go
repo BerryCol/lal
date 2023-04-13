@@ -18,6 +18,8 @@ import (
 // 缓存流起始的一些数据，判断流中是否存在音频、视频，以及编码格式，生成正确的mpegts PatPmt头信息
 //
 // 一旦判断结束，该队列变成直进直出，不再有实际缓存
+//
+// TODO(chef): [refactor] 文件名改为 rtmp2mpegts_filter__probe.go 202304
 type rtmp2MpegtsFilter struct {
 	maxMsgSize int
 	data       []base.RtmpMsg
@@ -71,7 +73,7 @@ func (q *rtmp2MpegtsFilter) Push(msg base.RtmpMsg) {
 	case base.RtmpTypeIdAudio:
 		q.audioCodecId = int(msg.Payload[0] >> 4)
 	case base.RtmpTypeIdVideo:
-		q.videoCodecId = int(msg.Payload[0] & 0xF)
+		q.videoCodecId = int(msg.VideoCodecId())
 	}
 
 	if q.videoCodecId != -1 && q.audioCodecId != -1 {
@@ -88,15 +90,13 @@ func (q *rtmp2MpegtsFilter) Push(msg base.RtmpMsg) {
 // ---------------------------------------------------------------------------------------------------------------------
 
 func (q *rtmp2MpegtsFilter) drain() {
-	switch q.videoCodecId {
-	case int(base.RtmpCodecIdAvc):
-		q.observer.onPatPmt(mpegts.FixedFragmentHeader)
-	case int(base.RtmpCodecIdHevc):
-		q.observer.onPatPmt(mpegts.FixedFragmentHeaderHevc)
-	default:
-		// TODO(chef) 正确处理只有音频或只有视频的情况 #56
-		q.observer.onPatPmt(mpegts.FixedFragmentHeader)
-	}
+
+	videoType := q.getVideoStreamType()
+	audioType := q.getAudioStreamType()
+	patpmt := mpegts.PackPat()
+	patpmt = append(patpmt, mpegts.PackPmt(videoType, audioType)...)
+	q.observer.onPatPmt(patpmt)
+
 	for i := range q.data {
 		q.observer.onPop(q.data[i])
 	}
@@ -104,4 +104,24 @@ func (q *rtmp2MpegtsFilter) drain() {
 	q.data = nil
 
 	q.done = true
+}
+
+func (q *rtmp2MpegtsFilter) getVideoStreamType() uint8 {
+	switch q.videoCodecId {
+	case int(base.RtmpCodecIdAvc):
+		return mpegts.StreamTypeAac
+	case int(base.RtmpCodecIdHevc):
+		return mpegts.StreamTypeHevc
+	}
+
+	return mpegts.StreamTypeUnknown
+}
+
+func (q *rtmp2MpegtsFilter) getAudioStreamType() uint8 {
+	switch q.audioCodecId {
+	case int(base.RtmpSoundFormatAac):
+		return mpegts.StreamTypeAac
+	}
+
+	return mpegts.StreamTypeUnknown
 }

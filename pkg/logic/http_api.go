@@ -9,16 +9,23 @@
 package logic
 
 import (
+	_ "embed"
 	"encoding/json"
-	"github.com/q191201771/naza/pkg/nazajson"
-	"io/ioutil"
+	"html/template"
+	"io"
 	"net"
 	"net/http"
+	"strings"
+
+	"github.com/q191201771/naza/pkg/nazajson"
 
 	"github.com/q191201771/naza/pkg/nazahttp"
 
 	"github.com/q191201771/lal/pkg/base"
 )
+
+//go:embed http_an__lal.html
+var webUITpl string
 
 type HttpApiServer struct {
 	addr string
@@ -45,6 +52,8 @@ func (h *HttpApiServer) Listen() (err error) {
 func (h *HttpApiServer) RunLoop() error {
 	mux := http.NewServeMux()
 
+	mux.HandleFunc("/lal.html", h.webUIHandler)
+
 	mux.HandleFunc("/api/stat/group", h.statGroupHandler)
 	mux.HandleFunc("/api/stat/all_group", h.statAllGroupHandler)
 	mux.HandleFunc("/api/stat/lal_info", h.statLalInfoHandler)
@@ -53,6 +62,7 @@ func (h *HttpApiServer) RunLoop() error {
 	mux.HandleFunc("/api/ctrl/stop_relay_pull", h.ctrlStopRelayPullHandler)
 	mux.HandleFunc("/api/ctrl/kick_session", h.ctrlKickSessionHandler)
 	mux.HandleFunc("/api/ctrl/start_rtp_pub", h.ctrlStartRtpPubHandler)
+	// 所有没有注册路由的走下面这个处理函数
 	mux.HandleFunc("/", h.notFoundHandler)
 
 	var srv http.Server
@@ -65,7 +75,7 @@ func (h *HttpApiServer) RunLoop() error {
 // ---------------------------------------------------------------------------------------------------------------------
 
 func (h *HttpApiServer) statLalInfoHandler(w http.ResponseWriter, req *http.Request) {
-	var v base.ApiStatLalInfo
+	var v base.ApiStatLalInfoResp
 	v.ErrorCode = base.ErrorCodeSucc
 	v.Desp = base.DespSucc
 	v.Data = h.sm.StatLalInfo()
@@ -73,7 +83,7 @@ func (h *HttpApiServer) statLalInfoHandler(w http.ResponseWriter, req *http.Requ
 }
 
 func (h *HttpApiServer) statAllGroupHandler(w http.ResponseWriter, req *http.Request) {
-	var v base.ApiStatAllGroup
+	var v base.ApiStatAllGroupResp
 	v.ErrorCode = base.ErrorCodeSucc
 	v.Desp = base.DespSucc
 	v.Data.Groups = h.sm.StatAllGroup()
@@ -81,7 +91,7 @@ func (h *HttpApiServer) statAllGroupHandler(w http.ResponseWriter, req *http.Req
 }
 
 func (h *HttpApiServer) statGroupHandler(w http.ResponseWriter, req *http.Request) {
-	var v base.ApiStatGroup
+	var v base.ApiStatGroupResp
 
 	q := req.URL.Query()
 	streamName := q.Get("stream_name")
@@ -103,13 +113,12 @@ func (h *HttpApiServer) statGroupHandler(w http.ResponseWriter, req *http.Reques
 	v.ErrorCode = base.ErrorCodeSucc
 	v.Desp = base.DespSucc
 	feedback(v, w)
-	return
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 
 func (h *HttpApiServer) ctrlStartRelayPullHandler(w http.ResponseWriter, req *http.Request) {
-	var v base.ApiCtrlStartRelayPull
+	var v base.ApiCtrlStartRelayPullResp
 	var info base.ApiCtrlStartRelayPullReq
 
 	j, err := unmarshalRequestJsonBody(req, &info, "url")
@@ -138,11 +147,10 @@ func (h *HttpApiServer) ctrlStartRelayPullHandler(w http.ResponseWriter, req *ht
 
 	resp := h.sm.CtrlStartRelayPull(info)
 	feedback(resp, w)
-	return
 }
 
 func (h *HttpApiServer) ctrlStopRelayPullHandler(w http.ResponseWriter, req *http.Request) {
-	var v base.ApiCtrlStopRelayPull
+	var v base.ApiCtrlStopRelayPullResp
 
 	q := req.URL.Query()
 	streamName := q.Get("stream_name")
@@ -157,11 +165,10 @@ func (h *HttpApiServer) ctrlStopRelayPullHandler(w http.ResponseWriter, req *htt
 
 	resp := h.sm.CtrlStopRelayPull(streamName)
 	feedback(resp, w)
-	return
 }
 
 func (h *HttpApiServer) ctrlKickSessionHandler(w http.ResponseWriter, req *http.Request) {
-	var v base.HttpResponseBasic
+	var v base.ApiCtrlKickSessionResp
 	var info base.ApiCtrlKickSessionReq
 
 	_, err := unmarshalRequestJsonBody(req, &info, "stream_name", "session_id")
@@ -177,11 +184,10 @@ func (h *HttpApiServer) ctrlKickSessionHandler(w http.ResponseWriter, req *http.
 
 	resp := h.sm.CtrlKickSession(info)
 	feedback(resp, w)
-	return
 }
 
 func (h *HttpApiServer) ctrlStartRtpPubHandler(w http.ResponseWriter, req *http.Request) {
-	var v base.ApiCtrlStartRtpPub
+	var v base.ApiCtrlStartRtpPubResp
 	var info base.ApiCtrlStartRtpPubReq
 
 	j, err := unmarshalRequestJsonBody(req, &info, "stream_name")
@@ -208,18 +214,47 @@ func (h *HttpApiServer) ctrlStartRtpPubHandler(w http.ResponseWriter, req *http.
 
 	resp := h.sm.CtrlStartRtpPub(info)
 	feedback(resp, w)
-	return
+}
+
+func (h *HttpApiServer) webUIHandler(w http.ResponseWriter, req *http.Request) {
+	t, err := template.New("webUI").Parse(webUITpl)
+	if err != nil {
+		Log.Errorf("invaild html template: %v", err)
+		return
+	}
+
+	lalInfo := h.sm.StatLalInfo()
+	data := map[string]interface{}{
+		"ServerID":      lalInfo.ServerId,
+		"LalVersion":    lalInfo.LalVersion,
+		"ApiVersion":    lalInfo.ApiVersion,
+		"NotifyVersion": lalInfo.NotifyVersion,
+		"WebUiVersion":  lalInfo.WebUiVersion,
+		"StartTime":     lalInfo.StartTime,
+	}
+	for _, item := range strings.Split(lalInfo.BinInfo, ". ") {
+		if index := strings.Index(item, "="); index != -1 {
+			k := item[:index]
+			v := strings.TrimPrefix(strings.TrimSuffix(item[index:], "."), "=")
+			data[k] = v
+		}
+	}
+	t.Execute(w, data)
+}
+
+func (h *HttpApiServer) notFoundHandler(w http.ResponseWriter, req *http.Request) {
+	Log.Warnf("invalid http-api request. uri=%s, raddr=%s", req.RequestURI, req.RemoteAddr)
+	//w.WriteHeader(http.StatusNotFound)
+	feedback(base.ApiNotFoundResp, w)
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 
-func (h *HttpApiServer) notFoundHandler(w http.ResponseWriter, req *http.Request) {
-	Log.Warnf("invalid http-api request. uri=%s, raddr=%s", req.RequestURI, req.RemoteAddr)
-}
-
 func feedback(v interface{}, w http.ResponseWriter) {
 	resp, _ := json.Marshal(v)
 	w.Header().Add("Server", base.LalHttpApiServer)
+	w.Header().Set("Access-Control-Allow-Origin", "*")             // 跨域
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type") // 跨域补充
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(resp)
 }
@@ -228,7 +263,7 @@ func feedback(v interface{}, w http.ResponseWriter) {
 //
 // TODO(chef): [refactor] 搬到naza中 202205
 func unmarshalRequestJsonBody(r *http.Request, info interface{}, keyFieldList ...string) (nazajson.Json, error) {
-	body, err := ioutil.ReadAll(r.Body)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		return nazajson.Json{}, err
 	}

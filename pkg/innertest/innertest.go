@@ -10,7 +10,7 @@ package innertest
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 	"runtime"
@@ -247,7 +247,7 @@ func entry() {
 
 	go func() {
 		b, _ := getHttpts()
-		_ = ioutil.WriteFile(wTsPullFileName, b, 0666)
+		_ = os.WriteFile(wTsPullFileName, b, 0666)
 		assert.Equal(t, goldenHttptsLenList[mode], len(b))
 		assert.Equal(t, goldenHttptsMd5List[mode], nazamd5.Md5(b))
 
@@ -327,27 +327,27 @@ func entry() {
 }
 
 func compareFile() {
-	r, err := ioutil.ReadFile(rFlvFileName)
+	r, err := os.ReadFile(rFlvFileName)
 	assert.Equal(t, nil, err)
 	Log.Debugf("%s filesize:%d", rFlvFileName, len(r))
 
 	// 检查httpflv
-	w, err := ioutil.ReadFile(wFlvPullFileName)
+	w, err := os.ReadFile(wFlvPullFileName)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, goldenHttpflvLenList[mode], len(w))
 	assert.Equal(t, goldenHttpflvMd5List[mode], nazamd5.Md5(w))
 
 	// 检查rtmp
-	w, err = ioutil.ReadFile(wRtmpPullFileName)
+	w, err = os.ReadFile(wRtmpPullFileName)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, goldenRtmpLenList[mode], len(w))
 	assert.Equal(t, goldenRtmpMd5List[mode], nazamd5.Md5(w))
 
 	// 检查hls的m3u8文件
-	playListM3u8, err := ioutil.ReadFile(wPlaylistM3u8FileName)
+	playListM3u8, err := os.ReadFile(wPlaylistM3u8FileName)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, goldenPlaylistM3u8List[mode], string(playListM3u8))
-	recordM3u8, err := ioutil.ReadFile(wRecordM3u8FileName)
+	recordM3u8, err := os.ReadFile(wRecordM3u8FileName)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, goldenRecordM3u8List[mode], string(recordM3u8))
 
@@ -431,7 +431,7 @@ func httpGet(url string) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return ioutil.ReadAll(resp.Body)
+	return io.ReadAll(resp.Body)
 }
 
 func httpPost(url string, info interface{}) ([]byte, error) {
@@ -440,7 +440,7 @@ func httpPost(url string, info interface{}) ([]byte, error) {
 		return nil, err
 	}
 	defer resp.Body.Close()
-	return ioutil.ReadAll(resp.Body)
+	return io.ReadAll(resp.Body)
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -463,16 +463,16 @@ var (
 	goldenHlsTsNumList = []int{8, 10, 8}
 	goldenHlsTsLenList = []int{2219152, 525648, 1696512}
 	goldenHlsTsMd5List = []string{
-		"b60463d6cde1f48e33dfa6fc8f15032c",
-		"2eb19ad498688dadf950b3e749985922",
-		"c53351cff80532717b680d098452bf9b",
+		"486042526860724016caac64afd40d92",
+		"f03c5ab24dddd8875f06cdea605cd87c",
+		"e25384bdd92e94157beaf3fd61701452",
 	}
 
 	goldenHttptsLenList = []int{2216332, 522264, 1693880}
 	goldenHttptsMd5List = []string{
-		"3d1c1cd75e09ad04cb8a96db28865692",
-		"0d102b6fb7fc3134e56a07f00292e888",
-		"4bb1b0752e3fb396bffb2c16c38ebfb4",
+		"000f9010b0eca08b7d5211e633e8f29e",
+		"0ec316060f1aeeb1d283b30158c2eeb8",
+		"1872c6ff1bde9fa591eeab8b197e5b1b",
 	}
 )
 

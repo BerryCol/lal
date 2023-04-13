@@ -18,12 +18,18 @@ import (
 const (
 	// RtmpTypeIdAudio spec-rtmp_specification_1.0.pdf
 	// 7.1. Types of Messages
-	RtmpTypeIdAudio              uint8 = 8
-	RtmpTypeIdVideo              uint8 = 9
-	RtmpTypeIdMetadata           uint8 = 18 // RtmpTypeIdDataMessageAmf0
-	RtmpTypeIdSetChunkSize       uint8 = 1
-	RtmpTypeIdAck                uint8 = 3
-	RtmpTypeIdUserControl        uint8 = 4
+	RtmpTypeIdAudio        uint8 = 8
+	RtmpTypeIdVideo        uint8 = 9
+	RtmpTypeIdMetadata     uint8 = 18 // RtmpTypeIdDataMessageAmf0
+	RtmpTypeIdSetChunkSize uint8 = 1
+	// RtmpTypeIdAck 和 RtmpTypeIdWinAckSize 的含义：
+	//
+	// 一端向另一端发送 RtmpTypeIdWinAckSize ，要求对端每收够一定数据（一定数据的阈值包含在 RtmpTypeIdWinAckSize 信令中）后，向本端回复 RtmpTypeIdAck 。
+	//
+	// 常见的应用场景：数据发送端要求数据接收端定时发送心跳信令给本端。
+	RtmpTypeIdAck         uint8 = 3
+	RtmpTypeIdUserControl uint8 = 4
+	// RtmpTypeIdWinAckSize 见 RtmpTypeIdAck
 	RtmpTypeIdWinAckSize         uint8 = 5
 	RtmpTypeIdBandwidth          uint8 = 6
 	RtmpTypeIdCommandMessageAmf3 uint8 = 17
@@ -65,6 +71,21 @@ const (
 	RtmpHevcPacketTypeSeqHeader       = RtmpAvcPacketTypeSeqHeader
 	RtmpHevcPacketTypeNalu            = RtmpAvcPacketTypeNalu
 
+	// enhanced-rtmp packetType https://github.com/veovera/enhanced-rtmp
+	RtmpExPacketTypeSequenceStart uint8 = 0
+	RtmpExPacketTypeCodedFrames   uint8 = 1 // CompositionTime不为0时有这个类型
+	RtmpExPacketTypeSequenceEnd   uint8 = 2
+	RtmpExPacketTypeCodedFramesX  uint8 = 3
+
+	// RtmpExFrameTypeKeyFrame RtmpExFrameTypeXXX...
+	//
+	// The following FrameType values are defined:
+	// 0 = reserved
+	// 1 = key frame (a seekable frame)
+	// 2 = inter frame (a non-seekable frame)
+	// ...
+	RtmpExFrameTypeKeyFrame uint8 = 1
+
 	RtmpAvcKeyFrame    = RtmpFrameTypeKey<<4 | RtmpCodecIdAvc
 	RtmpHevcKeyFrame   = RtmpFrameTypeKey<<4 | RtmpCodecIdHevc
 	RtmpAvcInterFrame  = RtmpFrameTypeInter<<4 | RtmpCodecIdAvc
@@ -80,9 +101,13 @@ const (
 	//   AACAUDIODATA
 	//     AACPacketType UI8
 	//     Data          UI8[n]
-	RtmpSoundFormatAac         uint8 = 10 // 注意，视频的CodecId是后4位，音频是前4位
-	RtmpAacPacketTypeSeqHeader       = 0
-	RtmpAacPacketTypeRaw             = 1
+	// 注意，视频的CodecId是后4位，音频是前4位
+	RtmpSoundFormatG711A uint8 = 7
+	RtmpSoundFormatG711U uint8 = 8
+	RtmpSoundFormatAac   uint8 = 10
+
+	RtmpAacPacketTypeSeqHeader = 0
+	RtmpAacPacketTypeRaw       = 1
 )
 
 type RtmpHeader struct {
@@ -103,7 +128,30 @@ func (msg RtmpMsg) IsAvcKeySeqHeader() bool {
 }
 
 func (msg RtmpMsg) IsHevcKeySeqHeader() bool {
-	return msg.Header.MsgTypeId == RtmpTypeIdVideo && msg.Payload[0] == RtmpHevcKeyFrame && msg.Payload[1] == RtmpHevcPacketTypeSeqHeader
+	if msg.Header.MsgTypeId != RtmpTypeIdVideo {
+		return false
+	}
+
+	isExtHeader := msg.Payload[0] & 0x80
+	if isExtHeader != 0 {
+		packetType := msg.Payload[0] & 0x0f
+		if msg.Payload[1] == 'h' && msg.Payload[2] == 'v' && msg.Payload[3] == 'c' && msg.Payload[4] == '1' && packetType == RtmpExPacketTypeSequenceStart {
+			return true
+		}
+	} else {
+		return msg.Payload[0] == RtmpHevcKeyFrame && msg.Payload[1] == RtmpHevcPacketTypeSeqHeader
+	}
+
+	return false
+}
+
+func (msg RtmpMsg) IsEnhanced() bool {
+	isExtHeader := msg.Payload[0] & 0x80
+	if isExtHeader != 0 {
+		return true
+	}
+
+	return false
 }
 
 func (msg RtmpMsg) IsVideoKeySeqHeader() bool {
@@ -115,7 +163,46 @@ func (msg RtmpMsg) IsAvcKeyNalu() bool {
 }
 
 func (msg RtmpMsg) IsHevcKeyNalu() bool {
-	return msg.Header.MsgTypeId == RtmpTypeIdVideo && msg.Payload[0] == RtmpHevcKeyFrame && msg.Payload[1] == RtmpHevcPacketTypeNalu
+	if msg.Header.MsgTypeId != RtmpTypeIdVideo {
+		return false
+	}
+
+	isExtHeader := msg.Payload[0] & 0x80
+	if isExtHeader != 0 {
+		frameType := msg.Payload[0] >> 4 & 0x07
+		packetType := msg.Payload[0] & 0x0F
+		return frameType == RtmpExFrameTypeKeyFrame && packetType != RtmpExPacketTypeSequenceStart
+	}
+
+	return msg.Payload[0] == RtmpHevcKeyFrame && msg.Payload[1] == RtmpHevcPacketTypeNalu
+}
+
+func (msg RtmpMsg) IsEnchanedHevcNalu() bool {
+	isExtHeader := msg.Payload[0] & 0x80
+	if isExtHeader != 0 {
+		packetType := msg.Payload[0] & 0x0f
+		if packetType == RtmpExPacketTypeCodedFrames || packetType == RtmpExPacketTypeCodedFramesX {
+			return true
+		}
+	}
+
+	return false
+}
+
+func (msg RtmpMsg) GetEnchanedHevcNaluIndex() int {
+	isExtHeader := msg.Payload[0] & 0x80
+	if isExtHeader != 0 {
+		packetType := msg.Payload[0] & 0x0f
+		switch packetType {
+		case RtmpExPacketTypeCodedFrames:
+			// NALU前面有3个字节CompositionTime
+			return 5 + 3
+		case RtmpExPacketTypeCodedFramesX:
+			return 5
+		}
+	}
+
+	return 0
 }
 
 func (msg RtmpMsg) IsVideoKeyNalu() bool {
@@ -123,11 +210,24 @@ func (msg RtmpMsg) IsVideoKeyNalu() bool {
 }
 
 func (msg RtmpMsg) IsAacSeqHeader() bool {
-	return msg.Header.MsgTypeId == RtmpTypeIdAudio && (msg.Payload[0]>>4) == RtmpSoundFormatAac && msg.Payload[1] == RtmpAacPacketTypeSeqHeader
+	return msg.Header.MsgTypeId == RtmpTypeIdAudio && msg.AudioCodecId() == RtmpSoundFormatAac && msg.Payload[1] == RtmpAacPacketTypeSeqHeader
 }
 
 func (msg RtmpMsg) VideoCodecId() uint8 {
-	return msg.Payload[0] & 0xF
+	isExtHeader := msg.Payload[0] & 0x80
+	if isExtHeader == 0 {
+		return msg.Payload[0] & 0xF
+	}
+
+	if msg.Payload[1] == 'h' && msg.Payload[2] == 'v' && msg.Payload[3] == 'c' && msg.Payload[4] == '1' {
+		return RtmpCodecIdHevc
+	}
+
+	return RtmpCodecIdAvc
+}
+
+func (msg RtmpMsg) AudioCodecId() uint8 {
+	return msg.Payload[0] >> 4
 }
 
 func (msg RtmpMsg) Clone() (ret RtmpMsg) {
@@ -148,7 +248,41 @@ func (msg RtmpMsg) Pts() uint32 {
 	return msg.Header.TimestampAbs + bele.BeUint24(msg.Payload[2:])
 }
 
+func (msg RtmpMsg) Cts() uint32 {
+	if msg.Header.MsgTypeId == RtmpTypeIdAudio {
+		return bele.BeUint24(msg.Payload[2:])
+	}
+
+	isExtHeader := msg.Payload[0] & 0x80
+	if isExtHeader != 0 {
+		packetType := msg.Payload[0] & 0x0F
+		switch packetType {
+		case RtmpExPacketTypeCodedFrames:
+			return bele.BeUint24(msg.Payload[5:])
+		case RtmpExPacketTypeCodedFramesX:
+			return 0
+		default:
+			Log.Warnf("RtmpMsg.Cts: packetType invalid, packetType=%d", packetType)
+			return 0
+		}
+	}
+
+	return bele.BeUint24(msg.Payload[2:])
+}
+
 func (msg RtmpMsg) DebugString() string {
+	isExtHeader := msg.Payload[0] & 0x80
+	if msg.Header.MsgTypeId == RtmpTypeIdVideo && isExtHeader != 0 {
+		frameType := msg.Payload[0] >> 4 & 0x07
+		packetType := msg.Payload[0] & 0x0F // e.g. RtmpExPacketTypeSequenceStart
+		if isExtHeader != 0 {
+			return fmt.Sprintf("type=%d,len=%d,dts=%d, ext(%d, %d, %d), payload=%s",
+				msg.Header.MsgTypeId, msg.Header.MsgLen, msg.Header.TimestampAbs,
+				isExtHeader, frameType, packetType,
+				hex.Dump(nazabytes.Prefix(msg.Payload, 64)))
+		}
+	}
+
 	return fmt.Sprintf("type=%d,len=%d,dts=%d, payload=%s",
 		msg.Header.MsgTypeId, msg.Header.MsgLen, msg.Header.TimestampAbs, hex.Dump(nazabytes.Prefix(msg.Payload, 64)))
 }

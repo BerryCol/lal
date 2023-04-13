@@ -11,6 +11,7 @@ package mpegts
 // MPEG: Moving Picture Experts Group
 
 // FixedFragmentHeader 每个TS文件都以固定的PAT，PMT开始
+// TODO(chef): [refactor] 考虑去掉这个fixed变量，目前只在测试中使用 [202303]
 var FixedFragmentHeader = []byte{
 	/* TS */
 	0x47, 0x40, 0x00, 0x10, 0x00,
@@ -71,6 +72,7 @@ var FixedFragmentHeader = []byte{
 }
 
 // FixedFragmentHeaderHevc 每个TS文件都以固定的PAT，PMT开始
+// TODO(chef): [refactor] 考虑去掉这个fixed变量，目前只在测试中使用 [202303]
 var FixedFragmentHeaderHevc = []byte{
 	/* TS */
 	0x47, 0x40, 0x00, 0x10, 0x00,
@@ -137,6 +139,7 @@ const (
 	syncByte uint8 = 0x47
 
 	PidPat   uint16 = 0
+	PidPmt   uint16 = 0x1001
 	PidVideo uint16 = 0x100
 	PidAudio uint16 = 0x101
 
@@ -157,9 +160,10 @@ const (
 	// 0x1B AVC  (video stream as defined in ITU-T Rec. H.264 | ISO/IEC 14496-10 Video)
 	// 0x24 HEVC (HEVC video stream as defined in Rec. ITU-T H.265 | ISO/IEC 23008-2  MPEG-H Part 2)
 	// -----------------------------------------------------------------------------
-	streamTypeAac  uint8 = 0x0F
-	streamTypeAvc  uint8 = 0x1B
-	streamTypeHevc uint8 = 0x24
+	StreamTypeUnknown uint8 = 0x00
+	StreamTypeAac     uint8 = 0x0F
+	StreamTypeAvc     uint8 = 0x1B
+	StreamTypeHevc    uint8 = 0x24
 )
 
 // PES

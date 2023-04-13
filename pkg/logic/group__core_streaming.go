@@ -238,6 +238,10 @@ func (group *Group) broadcastByRtmpMsg(msg base.RtmpMsg) {
 		group.rtmp2RtspRemuxer.FeedRtmpMsg(msg)
 	}
 
+	if group.customizeHookSessionContext != nil {
+		group.customizeHookSessionContext.OnMsg(msg)
+	}
+
 	// # 广播。遍历所有 rtmp sub session，转发数据
 	// ## 如果是新的 sub session，发送已缓存的信息
 	for session := range group.rtmpSubSessionSet {
@@ -375,13 +379,17 @@ func (group *Group) broadcastByRtmpMsg(msg base.RtmpMsg) {
 
 	// # 缓存关键信息，以及gop
 	if group.config.RtmpConfig.Enable || group.config.RtmpConfig.RtmpsEnable {
-		group.rtmpGopCache.Feed(msg, lazyRtmpChunkDivider.GetEnsureWithoutSdf())
+		if !group.rtmpGopCache.Feed(msg, lazyRtmpChunkDivider.GetEnsureWithoutSdf()) {
+			Log.Warnf("[%s] over frame number limit for a single gop in rtmp cache.", group.UniqueKey)
+		}
 		if msg.Header.MsgTypeId == base.RtmpTypeIdMetadata {
 			group.rtmpGopCache.SetMetadata(lazyRtmpChunkDivider.GetEnsureWithSdf(), lazyRtmpChunkDivider.GetEnsureWithoutSdf())
 		}
 	}
 	if group.config.HttpflvConfig.Enable {
-		group.httpflvGopCache.Feed(msg, lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf())
+		if !group.httpflvGopCache.Feed(msg, lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf()) {
+			Log.Warnf("[%s] over frame number limit for a single gop in http flv cache.", group.UniqueKey)
+		}
 		if msg.Header.MsgTypeId == base.RtmpTypeIdMetadata {
 			// 注意，因为withSdf实际上用不上，而且我们也没实现，所以全部用without了
 			group.httpflvGopCache.SetMetadata(lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf(), lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf())
@@ -390,8 +398,17 @@ func (group *Group) broadcastByRtmpMsg(msg base.RtmpMsg) {
 
 	// # 记录stat
 	if group.stat.AudioCodec == "" {
-		if msg.IsAacSeqHeader() {
-			group.stat.AudioCodec = base.AudioCodecAac
+		if msg.Header.MsgTypeId == base.RtmpTypeIdAudio {
+			switch msg.AudioCodecId() {
+			case base.RtmpSoundFormatAac:
+				if msg.IsAacSeqHeader() {
+					group.stat.AudioCodec = base.AudioCodecAac
+				}
+			case base.RtmpSoundFormatG711U:
+				group.stat.AudioCodec = base.AudioCodecG711U
+			case base.RtmpSoundFormatG711A:
+				group.stat.AudioCodec = base.AudioCodecG711A
+			}
 		}
 	}
 	if group.stat.VideoCodec == "" {
@@ -415,7 +432,14 @@ func (group *Group) broadcastByRtmpMsg(msg base.RtmpMsg) {
 			}
 		}
 		if msg.IsHevcKeySeqHeader() {
-			_, sps, _, err := hevc.ParseVpsSpsPpsFromSeqHeader(msg.Payload)
+			var sps []byte
+			var err error
+			if msg.IsEnhanced() {
+				_, sps, _, err = hevc.ParseVpsSpsPpsFromEnhancedSeqHeader(msg.Payload)
+			} else {
+				_, sps, _, err = hevc.ParseVpsSpsPpsFromSeqHeader(msg.Payload)
+			}
+
 			if err == nil {
 				var ctx hevc.Context
 				err = hevc.ParseSps(sps, &ctx)
